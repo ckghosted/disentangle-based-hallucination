@@ -5,7 +5,7 @@ disentangle-based data hallucination for few-shot learning
 <pre><code>
 # argument:
 # $1: n_way
-# $2: n_way
+# $2: n_shot
 # $3: n_query_all
 # ---------------
 # $4: z_dim/fc_dim
@@ -27,7 +27,7 @@ CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_baseline_noPro_lr1e5.sh 5 1 75
 <pre><code>
 # argument:
 # $1: n_way
-# $2: n_way
+# $2: n_shot
 # $3: n_aug
 # $4: n_query_all
 # ---------------
@@ -49,4 +49,18 @@ CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_n
     ./log_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a5q75_ep1hal1joint1ite6_ext3_0_noPro_lr1e5_testAug10
 CUDA_VISIBLE_DEVICES=1 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 5 1 5 75 512 64 16 20 1 1 1 6 ext3 0 4 10 > \
     ./log_PN_AFHN_1_tf1_ar1_m5n1a5q75_ep1hal1joint1ite6_ext3_0_noPro_lr1e5_testAug10
+</code></pre>
+
+# Data Splits
+The data splits are provided in the `data-split` folder as `json` files. Please refer to the following python code:
+<pre><code>
+import json
+
+train_path = './data-split/mini-imagenet/base.json'
+
+with open(train_path, 'r') as reader:
+        train_dict = json.loads(reader.read())
+
+train_image_list = train_dict['image_names']
+train_class_list = train_dict['image_labels']
 </code></pre>
