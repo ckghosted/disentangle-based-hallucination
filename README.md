@@ -69,7 +69,54 @@ CUDA_VISIBLE_DEVICES=1 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 
 </code></pre>
 
 ## few-shot multiclass classification
-- Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the training base-class split (`base_train.json`) and extract all base/val/novel train/test features (saved as pickle files).  
-- Use `train_hal.py` and `model_hal.py` to train various hallucinators using the features extracted from the training base-class split (`base_train.json`).  
+- Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the training base-class split (`base_train.json`) and extract all base/val/novel train/test features (saved as pickle files).
+
+<pre><code>
+CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_ext.py \
+    --result_path .. \
+    --model_name ResNet18_img224_base_train_ep100_withAug_withBN \
+    --n_class 64 \
+    --alpha_center 0.1 \
+    --lambda_center 0.0 \
+    --used_opt adam \
+    --train_path ./json_folder/base_train.json \
+    --test_path None \
+    --label_key image_labels \
+    --num_epoch 100 \
+    --bsize 128 \
+    --lr_start 1e-3 \
+    --lr_decay 0.5 \
+    --lr_decay_step 10 \
+    --use_aug \
+    --with_BN \
+    --run_extraction > ../log_ResNet18_img224_base_train_ep100_withAug_withBN
+# (execute 'unlink ext1' if necessary)
+ln -s ../ResNet18_img224_base_train_ep100_withAug_withBN ./ext1
+</code></pre>
+
+- Use `train_hal.py` and `model_hal.py` to train various hallucinators using the features extracted from the training base-class split (`base_train.json`).
+
+<pre><code>
+# argument:
+# $1: n_way
+# $2: n_shot
+# $3: n_aug
+# $4: n_query_all
+# ----------------
+# $5: z_dim/fc_dim
+# $6: n_train_class
+# $7: label_key (image_labels_id for CMU-multi-pie, image_labels for other datasets)
+# $8: exp_tag (cv/final for imagenet-1k, common for other datasets)
+# ----------------
+# $9: num_epoch
+# $10: extractor_folder (ext[1-9])
+# $11: num_parallel_calls
+
+CUDA_VISIBLE_DEVICES=1 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 image_labels common 30 ext2 4 > ./log_hal_GAN_withPro_m5n1a3q20_ep30_ext2
+CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_AFHN_1_tf1_ar1.sh 5 1 3 20 512 64 image_labels common 10 ext2 4 > ./log_hal_AFHN_1_tf1_ar1_m5n1a3q20_ep10_ext2
+CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0.sh 5 1 3 20 512 64 image_labels common 10 ext2 4 > ./log_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a3q20_ep10_ext2
+</code></pre>
+
 - Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation class (or each novel class), augment each class using the trained hallucinator, train a linear classifier using all training base-class features and the augmented validation (or novel) features, and finally test on the features extracted from the test splits (i.e., `base_test.json`, `val_test.json`, and `novel_test.json`).
+
 
