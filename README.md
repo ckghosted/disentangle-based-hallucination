@@ -1,7 +1,24 @@
 # disentangle-based-hallucination
 disentangle-based data hallucination for few-shot learning
 
-# baseline
+## Data Splits
+The data splits are provided in the `data-split` folder as `json` files. Please refer to the following python code:
+<pre><code>
+import json
+
+train_path = './data-split/mini-imagenet/base.json'
+
+with open(train_path, 'r') as reader:
+        train_dict = json.loads(reader.read())
+
+train_image_list = train_dict['image_names']
+train_class_list = train_dict['image_labels']
+</code></pre>
+For N-way k-shot episodic evaluation, use `base.json`, `val.json`, and `novel.json`; For few-shot multiclass classification, use `base_train.json`, `base_test.json`, `val_train.json`, `val_test.json`, `novel_train.json`, and `novel_test.json`.
+
+## N-way k-shot episodic evaluation
+Use `train.py` and `model.py` to run training (on base classes), validation (on validation classes), and the final evaluation (on novel classes) directly.
+### baseline
 <pre><code>
 # argument:
 # $1: n_way
@@ -23,7 +40,7 @@ CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_baseline_noPro_lr1e5.sh 5 1 75
     ./log_PN_baseline_m5n1q75_ep3ite6_ext3_0_noPro_lr1e5
 </code></pre>
 
-# PoseRef and AFHN
+### PoseRef and AFHN
 <pre><code>
 # argument:
 # $1: n_way
@@ -51,16 +68,8 @@ CUDA_VISIBLE_DEVICES=1 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 
     ./log_PN_AFHN_1_tf1_ar1_m5n1a5q75_ep1hal1joint1ite6_ext3_0_noPro_lr1e5_testAug10
 </code></pre>
 
-# Data Splits
-The data splits are provided in the `data-split` folder as `json` files. Please refer to the following python code:
-<pre><code>
-import json
+## few-shot multiclass classification
+- Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the training base-class split (`base_train.json`) and extract all base/val/novel train/test features (saved as pickle files).  
+- Use `train_hal.py` and `model_hal.py` to train various hallucinators using the features extracted from the training base-class split (`base_train.json`).  
+- Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation class (or each novel class), augment each class using the trained hallucinator, train a linear classifier using all training base-class features and the augmented validation (or novel) features, and finally test on the features extracted from the test splits (i.e., `base_test.json`, `val_test.json`, and `novel_test.json`).
 
-train_path = './data-split/mini-imagenet/base.json'
-
-with open(train_path, 'r') as reader:
-        train_dict = json.loads(reader.read())
-
-train_image_list = train_dict['image_names']
-train_class_list = train_dict['image_labels']
-</code></pre>
