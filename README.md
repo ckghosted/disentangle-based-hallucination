@@ -16,7 +16,7 @@ train_class_list = train_dict['image_labels']
 </code></pre>
 For N-way k-shot episodic evaluation, use `base.json`, `val.json`, and `novel.json`; For few-shot multiclass classification, use `base_train.json`, `base_test.json`, `val_train.json`, `val_test.json`, `novel_train.json`, and `novel_test.json`.
 
-## N-way k-shot episodic evaluation
+## 1. N-way k-shot episodic evaluation
 Use `train.py` and `model.py` to run training (on base classes), validation (on validation classes), and the final evaluation (on novel classes) directly.
 ### baseline
 <pre><code>
@@ -64,12 +64,13 @@ CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_baseline_noPro_lr1e5.sh 5 1 75
 # $16: n_aug_t
 CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_noPro_lr1e5.sh 5 1 5 75 512 64 16 20 1 1 1 6 ext3 0 4 10 > \
     ./log_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a5q75_ep1hal1joint1ite6_ext3_0_noPro_lr1e5_testAug10
-CUDA_VISIBLE_DEVICES=1 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 5 1 5 75 512 64 16 20 1 1 1 6 ext3 0 4 10 > \
+CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 5 1 5 75 512 64 16 20 1 1 1 6 ext3 0 4 10 > \
     ./log_PN_AFHN_1_tf1_ar1_m5n1a5q75_ep1hal1joint1ite6_ext3_0_noPro_lr1e5_testAug10
 </code></pre>
 
-## few-shot multiclass classification
-- Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the training base-class split (`base_train.json`) and extract all base/val/novel train/test features (saved as pickle files).
+## 2. Few-shot Multiclass Classification
+### Step 1
+Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the training base-class split (`base_train.json`) and extract all base/val/novel train/test features (saved as pickle files).
 
 <pre><code>
 CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_ext.py \
@@ -94,7 +95,8 @@ CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_ext.py \
 ln -s ../ResNet18_img224_base_train_ep100_withAug_withBN ./ext1
 </code></pre>
 
-- Use `train_hal.py` and `model_hal.py` to train various hallucinators using the features extracted from the training base-class split (`base_train.json`).
+### Step 2
+Use `train_hal.py` and `model_hal.py` to train various hallucinators using the features extracted from the training base-class split (`base_train.json`).
 
 <pre><code>
 # argument:
@@ -112,11 +114,26 @@ ln -s ../ResNet18_img224_base_train_ep100_withAug_withBN ./ext1
 # $10: extractor_folder (ext[1-9])
 # $11: num_parallel_calls
 
-CUDA_VISIBLE_DEVICES=1 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 image_labels common 30 ext2 4 > ./log_hal_GAN_withPro_m5n1a3q20_ep30_ext2
+CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 image_labels common 30 ext2 4 > ./log_hal_GAN_withPro_m5n1a3q20_ep30_ext2
 CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_AFHN_1_tf1_ar1.sh 5 1 3 20 512 64 image_labels common 10 ext2 4 > ./log_hal_AFHN_1_tf1_ar1_m5n1a3q20_ep10_ext2
 CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0.sh 5 1 3 20 512 64 image_labels common 10 ext2 4 > ./log_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a3q20_ep10_ext2
 </code></pre>
 
-- Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation class (or each novel class), augment each class using the trained hallucinator, train a linear classifier using all training base-class features and the augmented validation (or novel) features, and finally test on the features extracted from the test splits (i.e., `base_test.json`, `val_test.json`, and `novel_test.json`).
+### Step 3
+Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation class (or each novel class), augment each class using the trained hallucinator, train a linear classifier using all training base-class features and the augmented validation (or novel) features, and finally test on the features extracted from the test splits (i.e., `base_test.json`, `val_test.json`, and `novel_test.json`).
 
-
+<pre><code>
+# argument:
+# $1: n_shot (01, 02, 05, 10, or 20)
+# $2: n_aug (must be equal to n_shot for baseline)
+# $3: z_dim/fc_dim
+# $4: n_class
+# $5: n_base_class
+# $6: label_key (image_labels_id for CMU-multi-pie, image_labels for other datasets)
+# $7: extractor_folder (ext[1-9])
+# $8: exp_tag (cv/final for imagenet-1k, common for other datasets)
+# $9: num_ite (10000 for imagenet-1k, 2000 for other datasets)
+# $10: bsize (1000 for imagenet-1k, 200 for other datasets)
+CUDA_VISIBLE_DEVICES=0 sh script_folder/script_fsl_baseline.sh 01 1 512 80 64 image_labels ext2 val 2000 200 > ./results_baseline_val_shot01_ext2
+CUDA_VISIBLE_DEVICES=1 sh script_folder/script_fsl_GAN.sh 01 5 512 80 64 image_labels ext2 val 2000 200 > ./results_GAN_a5_val_shot01_ext2
+</code></pre>
