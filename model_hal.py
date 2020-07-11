@@ -155,7 +155,7 @@ class HAL_PN_GAN(object):
                  z_std=1.0,
                  l2scale=0.001,
                  n_train_class=64,
-                 with_BN_hal=False,
+                 with_BN=False,
                  with_pro=False,
                  bnDecay=0.9,
                  epsilon=1e-5,
@@ -174,7 +174,7 @@ class HAL_PN_GAN(object):
         self.z_std = z_std
         self.l2scale = l2scale
         self.n_train_class = n_train_class
-        self.with_BN_hal = with_BN_hal
+        self.with_BN = with_BN
         self.with_pro = with_pro
         self.bnDecay = bnDecay
         self.epsilon = epsilon
@@ -224,9 +224,9 @@ class HAL_PN_GAN(object):
         self.hal_feat = self.build_augmentor(self.support_features, self.n_way, self.n_shot, self.n_aug) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         self.hallucinated_features = tf.reshape(self.hal_feat, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
         if self.with_pro:
-            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal) #### shape: [self.n_way*self.n_shot, self.fc_dim]
-            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
-            self.hal_class_code = self.proto_encoder(self.hal_feat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
+            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
+            self.hal_class_code = self.proto_encoder(self.hal_feat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         else:
             self.support_class_code = self.support_feat_flat
             self.query_class_code = self.query_features
@@ -278,10 +278,10 @@ class HAL_PN_GAN(object):
         return [self.all_vars, self.trainable_vars, self.all_regs]
     
     ## "For PN, the embedding architecture consists of two MLP layers with ReLU as the activation function." (Y-X Wang, 2018)
-    def proto_encoder(self, x, bn_train, with_BN_hal=True, reuse=False):
+    def proto_encoder(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('pro', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
@@ -290,14 +290,14 @@ class HAL_PN_GAN(object):
     
     ## "For our hallucinator G, we use a three layer MLP with ReLU as the activation function." (Y-X Wang, 2018)
     ## Use linear_identity() that initializes network parameters with identity matrix
-    def hallucinator(self, x, bn_train, with_BN_hal=True, reuse=False):
+    def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn1')
             x = tf.nn.relu(x, name='relu1')
-            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense2') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn2')
             x = tf.nn.relu(x, name='relu2')
             x = linear_identity(x, self.fc_dim, add_bias=True, name='dense3') ## [-1,self.fc_dim]
@@ -325,7 +325,7 @@ class HAL_PN_GAN(object):
         sampled_support = tf.reshape(sampled_support, shape=[-1, self.fc_dim]) ### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         ### Make input matrix
         input_mat = tf.concat([sampled_support, input_z_vec], axis=1) #### shape: [n_way*(n_aug-n_shot), self.fc_dim+self.z_dim]
-        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
+        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         return hal_feat
     
     def train(self,
@@ -415,7 +415,7 @@ class HAL_PN_GAN2(HAL_PN_GAN):
                  z_std=1.0,
                  l2scale=0.001,
                  n_train_class=64,
-                 with_BN_hal=False,
+                 with_BN=False,
                  with_pro=False,
                  bnDecay=0.9,
                  epsilon=1e-5,
@@ -434,24 +434,24 @@ class HAL_PN_GAN2(HAL_PN_GAN):
                                           z_std,
                                           l2scale,
                                           n_train_class,
-                                          with_BN_hal,
+                                          with_BN,
                                           with_pro,
                                           bnDecay,
                                           epsilon,
                                           num_parallel_calls)
     
-    def hallucinator(self, x, bn_train, with_BN_hal=True, reuse=False):
+    def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn1')
             x = tf.nn.relu(x, name='relu1')
-            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense2') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn2')
             x = tf.nn.relu(x, name='relu2')
-            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense3') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense3') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn3')
             x = tf.nn.relu(x, name='relu3')
             x = linear_identity(x, self.fc_dim, add_bias=True, name='dense4') ## [-1,self.fc_dim]
@@ -474,7 +474,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                  z_std=1.0,
                  l2scale=0.001,
                  n_train_class=64,
-                 with_BN_hal=False,
+                 with_BN=False,
                  with_pro=False,
                  bnDecay=0.9,
                  epsilon=1e-5,
@@ -498,7 +498,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                           z_std,
                                           l2scale,
                                           n_train_class,
-                                          with_BN_hal,
+                                          with_BN,
                                           with_pro,
                                           bnDecay,
                                           epsilon,
@@ -535,9 +535,9 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.hallucinated_features = tf.concat((self.hallucinated_features_1, self.hallucinated_features_2), axis=1) ### shape: [self.n_way, 2, self.fc_dim]
         self.hal_feat = tf.reshape(self.hallucinated_features, shape=[self.n_way*2, -1]) ### shape: [self.n_way*2, self.fc_dim]
         if self.with_pro:
-            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal) #### shape: [self.n_way*self.n_shot, self.fc_dim]
-            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
-            self.hal_class_code = self.proto_encoder(self.hal_feat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
+            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
+            self.hal_class_code = self.proto_encoder(self.hal_feat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         else:
             self.support_class_code = self.support_feat_flat
             self.query_class_code = self.query_features
@@ -600,10 +600,10 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.feat_fake_1 = self.hal_feat_1 ### shape: [self.n_way, self.fc_dim]
         self.feat_fake_2 = self.hal_feat_2 ### shape: [self.n_way, self.fc_dim]
         if self.with_pro:
-            self.d_logit_real_1 = self.discriminator_tf(self.proto_encoder(self.feat_real_1, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True), bn_train=self.bn_train_hal)
-            self.d_logit_real_2 = self.discriminator_tf(self.proto_encoder(self.feat_real_2, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_1 = self.discriminator_tf(self.proto_encoder(self.feat_fake_1, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_2 = self.discriminator_tf(self.proto_encoder(self.feat_fake_2, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True), bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_real_1 = self.discriminator_tf(self.proto_encoder(self.feat_real_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal)
+            self.d_logit_real_2 = self.discriminator_tf(self.proto_encoder(self.feat_real_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_fake_1 = self.discriminator_tf(self.proto_encoder(self.feat_fake_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_fake_2 = self.discriminator_tf(self.proto_encoder(self.feat_fake_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
         else:
             self.d_logit_real_1 = self.discriminator_tf(self.feat_real_1, bn_train=self.bn_train_hal)
             self.d_logit_real_2 = self.discriminator_tf(self.feat_real_2, bn_train=self.bn_train_hal, reuse=True)
@@ -681,10 +681,10 @@ class HAL_PN_AFHN(HAL_PN_GAN):
     
     ## "The discriminator is also a twolayer MLP, with LeakyReLU as the activation function for the first layer
     ##  and Sigmoid for the second layer. The dimension of the hidden layer is also 1024." (K. Li, 2020)
-    def discriminator_tf(self, x, bn_train, with_BN_hal=False, reuse=False):
+    def discriminator_tf(self, x, bn_train, with_BN=False, reuse=False):
         with tf.variable_scope('discriminator_tf', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, 1024, add_bias=(~with_BN_hal), name='dense1')
-            if with_BN_hal:
+            x = linear(x, 1024, add_bias=(~with_BN), name='dense1')
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = lrelu(x, name='relu1', leak=0.01)
             x = linear(x, 1, add_bias=True, name='dense2')
@@ -694,14 +694,14 @@ class HAL_PN_AFHN(HAL_PN_GAN):
     
     ## "We implement the generator G as a two-layer MLP, with LeakyReLU activation for the first layer
     ##  and ReLU activation for the second one. The dimension of the hidden layer is 1024." (K. Li, CVPR 2020)
-    def hallucinator(self, x, bn_train, with_BN_hal=True, reuse=False):
+    def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear_identity(x, 1024, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, 1024, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn1')
             x = lrelu(x, name='relu1')
-            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense2') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train, name='bn2')
             x = tf.nn.relu(x, name='relu2')
         return x
@@ -712,7 +712,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         support_ave_tile_reshape = tf.reshape(support_ave_tile, shape=[-1, self.fc_dim]) ### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         ### Make input matrix
         input_mat = tf.concat([support_ave_tile_reshape, input_z_vec], axis=1) #### shape: [n_way*(n_aug-n_shot), self.fc_dim+self.z_dim]
-        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
+        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         return hal_feat, input_z_vec
     
     ## [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
@@ -722,7 +722,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         support_ave_tile_reshape = tf.reshape(support_ave_tile, shape=[-1, self.fc_dim]) ### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         ### Make input matrix
         input_mat = tf.concat([support_ave_tile_reshape, input_z_vec], axis=1) #### shape: [n_way*(n_aug-n_shot), self.fc_dim+self.z_dim]
-        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
+        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         return hal_feat, input_z_vec
     
     def train(self,
@@ -829,7 +829,7 @@ class HAL_PN_PoseRef(object):
                  fc_dim=512,
                  l2scale=0.001,
                  n_train_class=64,
-                 with_BN_hal=False,
+                 with_BN=False,
                  with_pro=False,
                  bnDecay=0.9,
                  epsilon=1e-5,
@@ -858,7 +858,7 @@ class HAL_PN_PoseRef(object):
         self.fc_dim = fc_dim
         self.l2scale = l2scale
         self.n_train_class = n_train_class
-        self.with_BN_hal = with_BN_hal
+        self.with_BN = with_BN
         self.with_pro = with_pro
         self.bnDecay = bnDecay
         self.epsilon = epsilon
@@ -924,9 +924,9 @@ class HAL_PN_PoseRef(object):
         self.query_labels_vec = tf.one_hot(self.query_labels, self.n_way)
         ### hallucination flow
         if self.with_pro:
-            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal) #### shape: [self.n_way*self.n_shot, self.fc_dim]
-            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
-            self.pose_ref_class_code = self.proto_encoder(self.pose_ref_feat_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
+            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
+            self.pose_ref_class_code = self.proto_encoder(self.pose_ref_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         else:
             self.support_class_code = self.support_feat_flat
             self.query_class_code = self.query_features
@@ -935,11 +935,11 @@ class HAL_PN_PoseRef(object):
         self.support_encode_ave = tf.reduce_mean(self.support_encode, axis=1, keep_dims=True) ### shape: [self.n_way, 1, self.fc_dim]
         self.support_encode_ave_tile = tf.tile(self.support_encode_ave, multiples=[1, self.n_aug-self.n_shot, 1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
         self.support_encode_ave_tile_flat = tf.reshape(self.support_encode_ave_tile, shape=[-1, self.fc_dim]) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
-        self.transformed_pose_ref, self.pose_code = self.transformer(self.pose_ref_feat_flat, self.support_encode_ave_tile_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal) ### shape=[self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.transformed_pose_ref, self.pose_code = self.transformer(self.pose_ref_feat_flat, self.support_encode_ave_tile_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) ### shape=[self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         self.hallucinated_features = tf.reshape(self.transformed_pose_ref, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
         ### prototypical network data flow using the augmented support set
         if self.with_pro:
-            self.hal_class_code = self.proto_encoder(self.transformed_pose_ref, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+            self.hal_class_code = self.proto_encoder(self.transformed_pose_ref, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         else:
             self.hal_class_code = self.transformed_pose_ref
         self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
@@ -957,19 +957,19 @@ class HAL_PN_PoseRef(object):
         self.pose_ref_encode_ave = tf.reduce_mean(self.pose_ref_encode, axis=1, keep_dims=True) ### shape: [self.n_way, 1, self.fc_dim]
         self.pose_ref_encode_ave_tile = tf.tile(self.pose_ref_encode_ave, multiples=[1, self.n_aug-self.n_shot, 1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
         self.pose_ref_encode_ave_tile_flat = tf.reshape(self.pose_ref_encode_ave_tile, shape=[-1, self.fc_dim]) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
-        self.pose_ref_recon, self.transformed_pose_code = self.transformer(self.transformed_pose_ref, self.pose_ref_encode_ave_tile_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) ### shape=[self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.pose_ref_recon, self.transformed_pose_code = self.transformer(self.transformed_pose_ref, self.pose_ref_encode_ave_tile_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) ### shape=[self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         self.loss_pose_ref_recon = tf.reduce_mean((self.pose_ref_feat_flat - self.pose_ref_recon)**2)
         self.loss_pose_code_recon = tf.reduce_mean((self.pose_code - self.transformed_pose_code)**2)
         ### reconstruction loss
         self.support_encode_ave_tile2 = tf.tile(self.support_encode_ave, multiples=[1, self.n_shot, 1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
         self.support_encode_ave_tile2_flat = tf.reshape(self.support_encode_ave_tile2, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_shot, self.fc_dim]
-        self.support_recon, _ = self.transformer(self.support_feat_flat, self.support_encode_ave_tile2_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True)
+        self.support_recon, _ = self.transformer(self.support_feat_flat, self.support_encode_ave_tile2_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True)
         self.loss_support_recon = tf.reduce_mean((self.support_feat_flat - self.support_recon)**2)
         ### intra-class transformation consistency loss
         ### (if pose-ref are of the same class as the support samples, then the transformed pose-ref should be as close to the pose-ref itself as possible)
         self.support_encode_ave_tile3 = tf.tile(self.support_encode_ave, multiples=[1, self.n_intra, 1]) ### shape: [self.n_way, self.n_intra, self.fc_dim]
         self.support_encode_ave_tile3_flat = tf.reshape(self.support_encode_ave_tile3, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_intra, self.fc_dim]
-        self.transformed_pose_ref_intra, _ = self.transformer(self.pose_ref_intra_feat_flat, self.support_encode_ave_tile3_flat, bn_train=self.bn_train_hal, with_BN_hal=self.with_BN_hal, reuse=True) ### shape=[self.n_way*self.n_intra, self.fc_dim]
+        self.transformed_pose_ref_intra, _ = self.transformer(self.pose_ref_intra_feat_flat, self.support_encode_ave_tile3_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) ### shape=[self.n_way*self.n_intra, self.fc_dim]
         self.loss_intra = tf.reduce_mean((self.pose_ref_intra_feat_flat - self.transformed_pose_ref_intra)**2)
         
         ### collect update operations for moving-means and moving-variances for batch normalizations
@@ -1013,40 +1013,40 @@ class HAL_PN_PoseRef(object):
         return [self.all_vars, self.trainable_vars, self.all_regs]
     
     ## pose code discriminator
-    def discriminator_pose(self, x, bn_train, with_BN_hal=False, reuse=False):
+    def discriminator_pose(self, x, bn_train, with_BN=False, reuse=False):
         with tf.variable_scope('discriminator_pose', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = lrelu(x, name='relu1', leak=0.01)
             x = linear(x, self.n_train_class, add_bias=True, name='dense2') ## [-1,self.fc_dim]
             return x
 
     ## hallucinated feature discriminator
-    def discriminator_tf(self, x, bn_train, with_BN_hal=False, reuse=False):
+    def discriminator_tf(self, x, bn_train, with_BN=False, reuse=False):
         with tf.variable_scope('discriminator_tf', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = lrelu(x, name='relu1', leak=0.01)
             x = linear(x, 1, add_bias=True, name='dense2') ## [-1,self.fc_dim]
             return x
 
     ## "For PN, the embedding architecture consists of two MLP layers with ReLU as the activation function." (Y-X Wang, 2018)
-    def proto_encoder(self, x, bn_train, with_BN_hal=True, reuse=False):
+    def proto_encoder(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('pro', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
             x = tf.nn.relu(x, name='relu2')
         return x
     
-    def encoder_pose(self, x, bn_train, with_BN_hal=True, reuse=False):
+    def encoder_pose(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal_enc_pose', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
@@ -1054,12 +1054,12 @@ class HAL_PN_PoseRef(object):
             return x
     
     ## Add a transformer to encode the pose_ref into seed class
-    def transformer(self, input_pose, code_class, bn_train, with_BN_hal=True, epsilon=1e-5, reuse=False):
-        code_pose = self.encoder_pose(input_pose, bn_train=bn_train, with_BN_hal=with_BN_hal, reuse=reuse)
+    def transformer(self, input_pose, code_class, bn_train, with_BN=True, epsilon=1e-5, reuse=False):
+        code_pose = self.encoder_pose(input_pose, bn_train=bn_train, with_BN=with_BN, reuse=reuse)
         x = tf.concat([code_class, code_pose], axis=1)
         with tf.variable_scope('hal_tran', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            x = linear(x, self.fc_dim, add_bias=(~with_BN_hal), name='dense1') ## [-1,self.fc_dim]
-            if with_BN_hal:
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]

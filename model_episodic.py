@@ -2387,15 +2387,15 @@ class HAL_PN_AFHN(HAL_PN_GAN):
     ##  and ReLU activation for the second one. The dimension of the hidden layer is 1024." (K. Li, CVPR 2020)
     def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
-            # x = linear(x, 1024, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            # x = linear_identity(x, 1024, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
             # if with_BN:
             #     x = batch_norm(x, is_train=bn_train, name='bn1')
-            x = linear(x, 1024, add_bias=True, name='dense1') ## [-1,self.fc_dim]
+            x = linear_identity(x, 1024, add_bias=True, name='dense1') ## [-1,self.fc_dim]
             x = lrelu(x, name='relu1')
-            # x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
+            # x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
             # if with_BN:
             #     x = batch_norm(x, is_train=bn_train, name='bn2')
-            x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
+            x = linear_identity(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
             x = tf.nn.relu(x, name='relu2')
         return x
     

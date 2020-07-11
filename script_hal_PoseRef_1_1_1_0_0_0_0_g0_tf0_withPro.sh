@@ -13,7 +13,7 @@ do
                         python3 ./script_folder/train_hal.py \
                             --result_path . \
                             --extractor_folder $9 \
-                            --hallucinator_name HAL_PN_GAN_withPro_m${n_way}n${n_shot}a${n_aug}q${n_query_all}_ep${num_epoch}_$9 \
+                            --hallucinator_name HAL_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_withPro_m${n_way}n${n_shot}a${n_aug}q${n_query_all}_ep${num_epoch}_$9 \
                             --l2scale 0.0 \
                             --n_way ${n_way} \
                             --n_shot ${n_shot} \
@@ -28,7 +28,16 @@ do
                             --n_train_class $6 \
                             --exp_tag $7 \
                             --debug \
-                            --GAN \
+                            --AFHN \
+                            --lambda_meta 1.0 \
+                            --lambda_recon 1.0 \
+                            --lambda_consistency 1.0 \
+                            --lambda_consistency_pose 0.0 \
+                            --lambda_intra 0.0 \
+                            --lambda_pose_code_reg 0.0 \
+                            --lambda_aux 0.0 \
+                            --lambda_gan 0.0 \
+                            --lambda_tf 0.0 \
                             --with_pro
                     done
                 done

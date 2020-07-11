@@ -351,7 +351,8 @@ class FSL_PN_GAN(FSL):
                  used_opt='sgd',
                  z_dim=100,
                  z_std=1.0,
-                 with_BN=False):
+                 with_BN=False,
+                 with_pro=False):
         super(FSL_PN_GAN, self).__init__(sess,
                                          model_name,
                                          result_path,
@@ -365,6 +366,7 @@ class FSL_PN_GAN(FSL):
         self.z_dim = z_dim
         self.z_std = z_std
         self.with_BN = with_BN
+        self.with_pro = with_pro
 
     def build_model(self):
         ### model parameters
@@ -376,7 +378,10 @@ class FSL_PN_GAN(FSL):
         self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
         
         ### data flow
-        self.features_encode = self.proto_encoder(self.features, bn_train=self.bn_train, with_BN=self.with_BN)
+        if self.with_pro:
+            self.features_encode = self.proto_encoder(self.features, bn_train=self.bn_train, with_BN=self.with_BN)
+        else:
+            self.features_encode = self.features
         self.logits = self.fsl_classifier(self.features_encode)
         
         ### loss
@@ -632,7 +637,8 @@ class FSL_PN_GAN2(FSL_PN_GAN):
                  used_opt='sgd',
                  z_dim=100,
                  z_std=1.0,
-                 with_BN=False):
+                 with_BN=False,
+                 with_pro=False):
         super(FSL_PN_GAN2, self).__init__(sess,
                                           model_name,
                                           result_path,
@@ -645,7 +651,8 @@ class FSL_PN_GAN2(FSL_PN_GAN):
                                           used_opt,
                                           z_dim,
                                           z_std,
-                                          with_BN)
+                                          with_BN,
+                                          with_pro)
 
     def hallucinator(self, x, bn_train, with_BN=False, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
@@ -679,7 +686,8 @@ class FSL_PN_AFHN(FSL_PN_GAN):
                  used_opt='sgd',
                  z_dim=100,
                  z_std=1.0,
-                 with_BN=False):
+                 with_BN=False,
+                 with_pro=False):
         super(FSL_PN_AFHN, self).__init__(sess,
                                           model_name,
                                           result_path,
@@ -692,7 +700,8 @@ class FSL_PN_AFHN(FSL_PN_GAN):
                                           used_opt,
                                           z_dim,
                                           z_std,
-                                          with_BN)
+                                          with_BN,
+                                          with_pro)
     
     def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
@@ -721,6 +730,7 @@ class FSL_PN_PoseRef(FSL):
                  n_gallery_per_class=0,
                  n_base_lb_per_novel=5,
                  with_BN=False,
+                 with_pro=False,
                  use_canonical_gallery=False,
                  n_clusters_per_class=0):
         super(FSL_PN_PoseRef, self).__init__(sess,
@@ -739,6 +749,7 @@ class FSL_PN_PoseRef(FSL):
         else:
             self.n_base_lb_per_novel = self.n_base_class
         self.with_BN = with_BN
+        self.with_pro = with_pro
         self.use_canonical_gallery = use_canonical_gallery
         self.n_clusters_per_class = n_clusters_per_class
     
@@ -752,7 +763,10 @@ class FSL_PN_PoseRef(FSL):
         self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
         
         ### data flow
-        self.features_encode = self.proto_encoder(self.features, bn_train=self.bn_train, with_BN=self.with_BN)
+        if self.with_pro:
+            self.features_encode = self.proto_encoder(self.features, bn_train=self.bn_train, with_BN=self.with_BN)
+        else:
+            self.features_encode = self.features
         self.logits = self.fsl_classifier(self.features_encode)
         
         ### loss
@@ -770,7 +784,10 @@ class FSL_PN_PoseRef(FSL):
 
         ### Data flow to extract class codes and pose codes for visualization
         self.novel_feat = tf.placeholder(tf.float32, shape=[None, self.fc_dim], name='novel_feat')
-        self.novel_code_class = self.proto_encoder(self.novel_feat, bn_train=self.bn_train, with_BN=self.with_BN, reuse=True)
+        if self.with_pro:
+            self.novel_code_class = self.proto_encoder(self.novel_feat, bn_train=self.bn_train, with_BN=self.with_BN, reuse=True)
+        else:
+            self.novel_code_class = self.novel_feat
         self.novel_code_pose = self.encoder_pose(self.novel_feat, bn_train=self.bn_train, with_BN=self.with_BN, reuse=True)
         
         ### variables and regularizers

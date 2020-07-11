@@ -60,6 +60,7 @@ def main():
     parser.add_argument('--z_std', default=1.0, type=float, help='Standard deviation of the input noise to the GAN-based hallucinator')
     parser.add_argument('--gpu_frac', default=0.5, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
     parser.add_argument('--with_BN', action='store_true', help='Use batch_norm() in the feature extractor mode if present')
+    parser.add_argument('--with_pro', action='store_true', help='Use additional embedding network for prototypical network if present')
     parser.add_argument('--ite_idx', default=0, type=int, help='iteration index for imagenet-1k dataset (0, 1, 2, 3, 4)')
     parser.add_argument('--n_gallery_per_class', default=0, type=int, help='Number of samples per class in the gallery set, default 0: use the whole base-class dataset')
     parser.add_argument('--n_base_lb_per_novel', default=5, type=int, help='number of base classes as the candidates of pose-ref for each novel class')
@@ -120,7 +121,8 @@ def train(args):
                              l2scale=args.l2scale,
                              z_dim=args.z_dim,
                              z_std=args.z_std,
-                             with_BN=args.with_BN)
+                             with_BN=args.with_BN,
+                             with_pro=args.with_pro)
         elif args.GAN2:
             net = FSL_PN_GAN2(sess,
                               model_name=args.model_name,
@@ -131,7 +133,8 @@ def train(args):
                               l2scale=args.l2scale,
                               z_dim=args.z_dim,
                               z_std=args.z_std,
-                              with_BN=args.with_BN)
+                              with_BN=args.with_BN,
+                              with_pro=args.with_pro)
         elif args.PoseRef:
             net = FSL_PN_PoseRef(sess,
                                  model_name=args.model_name,
@@ -143,6 +146,7 @@ def train(args):
                                  n_gallery_per_class=args.n_gallery_per_class,
                                  n_base_lb_per_novel=args.n_base_lb_per_novel,
                                  with_BN=args.with_BN,
+                                 with_pro=args.with_pro,
                                  use_canonical_gallery=args.use_canonical_gallery,
                                  n_clusters_per_class=args.n_clusters_per_class)
         else:
@@ -241,7 +245,8 @@ def inference(args):
                              l2scale=args.l2scale,
                              z_dim=args.z_dim,
                              z_std=args.z_std,
-                             with_BN=args.with_BN)
+                             with_BN=args.with_BN,
+                             with_pro=args.with_pro)
         elif args.GAN2:
             net = FSL_PN_GAN2(sess,
                               model_name=args.model_name,
@@ -252,7 +257,8 @@ def inference(args):
                               l2scale=args.l2scale,
                               z_dim=args.z_dim,
                               z_std=args.z_std,
-                              with_BN=args.with_BN)
+                              with_BN=args.with_BN,
+                              with_pro=args.with_pro)
         elif args.PoseRef:
             net = FSL_PN_PoseRef(sess,
                                  model_name=args.model_name,
@@ -264,6 +270,7 @@ def inference(args):
                                  n_gallery_per_class=args.n_gallery_per_class,
                                  n_base_lb_per_novel=args.n_base_lb_per_novel,
                                  with_BN=args.with_BN,
+                                 with_pro=args.with_pro,
                                  use_canonical_gallery=args.use_canonical_gallery,
                                  n_clusters_per_class=args.n_clusters_per_class)
         else:

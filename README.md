@@ -35,7 +35,6 @@ CUDA_VISIBLE_DEVICES=0 python3 script_folder/train_ext.py \
     --result_path .. \
     --model_name ResNet18_img224_base_ep100 \
     --n_class 64 \
-    --used_opt adam \
     --train_path ./json_folder/base.json \
     --num_epoch 100 \
     --bsize 128 \
@@ -123,9 +122,6 @@ CUDA_VISIBLE_DEVICES=1 python3 ./script_folder/train_ext.py \
     --result_path .. \
     --model_name ResNet18_img224_base_train_ep100 \
     --n_class 64 \
-    --alpha_center 0.1 \
-    --lambda_center 0.0 \
-    --used_opt adam \
     --train_path ./json_folder/base_train.json \
     --test_path None \
     --num_epoch 100 \
@@ -155,10 +151,9 @@ Use `train_hal.py` and `model_hal.py` to train various hallucinators using the f
 # ----------------
 # $8: num_epoch
 # $9: extractor_folder (ext[1-9] from Step 1, must be specified)
-# $10: num_parallel_calls
-CUDA_VISIBLE_DEVICES=2 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 common 100 ext1 4 > ./log_hal_GAN_withPro_m5n1a3q20_ep100_ext1
-CUDA_VISIBLE_DEVICES=3 sh script_folder/script_hal_AFHN_1_tf1_ar1.sh 5 1 3 20 512 64 common 100 ext1 4 > ./log_hal_AFHN_1_tf1_ar1_m5n1a3q20_ep100_ext1
-CUDA_VISIBLE_DEVICES=4 sh script_folder/script_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0.sh 5 1 3 20 512 64 common 100 ext1 4 > ./log_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a3q20_ep100_ext1
+CUDA_VISIBLE_DEVICES=2 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 common 100 ext1 > ./log_hal_GAN_withPro_m5n1a3q20_ep100_ext1
+CUDA_VISIBLE_DEVICES=3 sh script_folder/script_hal_AFHN_1_tf1_ar1_noPro.sh 5 1 3 20 512 64 common 100 ext1 > ./log_hal_AFHN_1_tf1_ar1_noPro_m5n1a3q20_ep100_ext1
+CUDA_VISIBLE_DEVICES=4 sh script_folder/script_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_withPro.sh 5 1 3 20 512 64 common 100 ext1 > ./log_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_withPro_m5n1a3q20_ep100_ext1
 </code></pre>
 
 ### Step 3

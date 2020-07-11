@@ -13,7 +13,7 @@ do
                         python3 ./script_folder/train_hal.py \
                             --result_path . \
                             --extractor_folder $9 \
-                            --hallucinator_name HAL_PN_GAN_withPro_m${n_way}n${n_shot}a${n_aug}q${n_query_all}_ep${num_epoch}_$9 \
+                            --hallucinator_name HAL_PN_GAN_noBN_withPro_m${n_way}n${n_shot}a${n_aug}q${n_query_all}_ep${num_epoch}_$9 \
                             --l2scale 0.0 \
                             --n_way ${n_way} \
                             --n_shot ${n_shot} \

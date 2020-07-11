@@ -60,7 +60,7 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Debug mode if present')
     parser.add_argument('--label_key', default='image_labels', type=str, help='image_labels or image_labels_id')
     parser.add_argument('--gpu_frac', default=0.5, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
-    parser.add_argument('--with_BN_hal', action='store_true', help='Use batch_norm() in the feature extractor mode if present')
+    parser.add_argument('--with_BN', action='store_true', help='Use batch_norm() in the feature extractor mode if present')
     parser.add_argument('--with_pro', action='store_true', help='Use additional embedding network for prototypical network if present')
     parser.add_argument('--num_parallel_calls', default=4, type=int, help='Number of core used to prepare data')
     parser.add_argument('--exp_tag', type=str, help='cv, final, or common')
@@ -98,7 +98,7 @@ def train(args):
                              z_std=args.z_std,
                              l2scale=args.l2scale,
                              n_train_class=args.n_train_class,
-                             with_BN_hal=args.with_BN_hal,
+                             with_BN=args.with_BN,
                              with_pro=args.with_pro,
                              num_parallel_calls=args.num_parallel_calls)
         elif args.GAN2:
@@ -118,7 +118,7 @@ def train(args):
                               z_std=args.z_std,
                               l2scale=args.l2scale,
                               n_train_class=args.n_train_class,
-                              with_BN_hal=args.with_BN_hal,
+                              with_BN=args.with_BN,
                               with_pro=args.with_pro,
                               num_parallel_calls=args.num_parallel_calls)
         elif args.AFHN:
@@ -137,7 +137,7 @@ def train(args):
                               z_std=args.z_std,
                               l2scale=args.l2scale,
                               n_train_class=args.n_train_class,
-                              with_BN_hal=args.with_BN_hal,
+                              with_BN=args.with_BN,
                               with_pro=args.with_pro,
                               num_parallel_calls=args.num_parallel_calls,
                               lambda_meta=args.lambda_meta,
@@ -159,7 +159,7 @@ def train(args):
                                  z_std=args.z_std,
                                  l2scale=args.l2scale,
                                  n_train_class=args.n_train_class,
-                                 with_BN_hal=args.with_BN_hal,
+                                 with_BN=args.with_BN,
                                  with_pro=args.with_pro,
                                  num_parallel_calls=args.num_parallel_calls,
                                  lambda_meta=args.lambda_meta,
