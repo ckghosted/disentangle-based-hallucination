@@ -50,7 +50,7 @@ def main():
     parser.add_argument('--num_ite', default=10000, type=int, help='Number of iterations for training the final linear classifier')
     parser.add_argument('--fc_dim', default=512, type=int, help='Feature dimension')
     parser.add_argument('--debug', action='store_true', help='Debug mode if present')
-    parser.add_argument('--label_key', type=str, help='image_labels or image_labels_id')
+    parser.add_argument('--label_key', default='image_labels', type=str, help='image_labels or image_labels_id')
     parser.add_argument('--exp_tag', type=str, help='cv or final for imagenet-1k; val or novel for other datasets')
     parser.add_argument('--GAN', action='store_true', help='Use GAN-based hallucinator if present')
     parser.add_argument('--GAN2', action='store_true', help='Use GAN-based hallucinator (with one more layer in the hallucinator) if present')

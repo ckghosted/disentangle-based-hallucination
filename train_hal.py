@@ -58,7 +58,7 @@ def main():
     parser.add_argument('--AFHN', action='store_true', help='Use AFHN if present')
     parser.add_argument('--PoseRef', action='store_true', help='Use pose-ref-based hallucinator if present')
     parser.add_argument('--debug', action='store_true', help='Debug mode if present')
-    parser.add_argument('--label_key', type=str, help='image_labels or image_labels_id')
+    parser.add_argument('--label_key', default='image_labels', type=str, help='image_labels or image_labels_id')
     parser.add_argument('--gpu_frac', default=0.5, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
     parser.add_argument('--with_BN_hal', action='store_true', help='Use batch_norm() in the feature extractor mode if present')
     parser.add_argument('--with_pro', action='store_true', help='Use additional embedding network for prototypical network if present')

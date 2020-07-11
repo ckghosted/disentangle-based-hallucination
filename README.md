@@ -33,20 +33,20 @@ Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the ba
 # (the extractor folder will be saved under the 'mini-imagenet' folder)
 CUDA_VISIBLE_DEVICES=0 python3 script_folder/train_ext.py \
     --result_path .. \
-    --model_name ResNet18_img224_base_ep3 \
+    --model_name ResNet18_img224_base_ep100 \
     --n_class 64 \
     --used_opt adam \
     --train_path ./json_folder/base.json \
-    --num_epoch 3 \
+    --num_epoch 100 \
     --bsize 128 \
     --lr_start 1e-3 \
     --lr_decay 0.5 \
-    --lr_decay_step 1 \
+    --lr_decay_step 10 \
     --use_aug \
     --with_BN \
-    --run_extraction > ../log_ResNet18_img224_base_ep3
+    --run_extraction > ../log_ResNet18_img224_base_ep100
 # (execute 'unlink ext1' if necessary)
-ln -s ../ResNet18_img224_base_ep3 ./ext1
+ln -s ../ResNet18_img224_base_ep100 ./ext1
 </code></pre>
 
 ### Step 2
@@ -100,8 +100,8 @@ CUDA_VISIBLE_DEVICES=0 sh script_folder/script_PN_baseline_noPro_lr1e5.sh 5 1 75
 # $16: num_parallel_calls
 CUDA_VISIBLE_DEVICES=1 sh script_folder/script_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_noPro_lr1e5.sh 5 1 5 75 512 64 16 20 0 3 0 6 ext1 0 4 10 > \
     ./log_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a5q75_ep0hal3joint0ite6_ext1_0_noPro_lr1e5_testAug10
-CUDA_VISIBLE_DEVICES=2 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 5 1 5 75 512 64 16 20 0 3 0 6 ext1 0 4 10 > \
-    ./log_PN_AFHN_1_tf1_ar1_m5n1a5q75_ep0hal3joint0ite6_ext1_0_noPro_lr1e5_testAug10
+CUDA_VISIBLE_DEVICES=2 sh script_folder/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh 5 1 3 75 512 64 16 20 0 3 0 6 ext1 0 4 10 > \
+    ./log_PN_AFHN_1_tf1_ar1_m5n1a3q75_ep0hal3joint0ite6_ext1_0_noPro_lr1e5_testAug10
 </code></pre>
 
 ## 2. Few-shot Multiclass Classification
@@ -119,7 +119,7 @@ Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the tr
 <pre><code>
 # (execute the following code under the 'mini-imagenet/multiclass' directory)
 # (the extractor folder will be saved under the 'mini-imagenet' folder)
-CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_ext.py \
+CUDA_VISIBLE_DEVICES=1 python3 ./script_folder/train_ext.py \
     --result_path .. \
     --model_name ResNet18_img224_base_train_ep100 \
     --n_class 64 \
@@ -142,7 +142,6 @@ ln -s ../ResNet18_img224_base_train_ep100 ./ext1
 
 ### Step 2
 Use `train_hal.py` and `model_hal.py` to train various hallucinators using the features extracted from the training base-class split (`base_train.json`).
-
 <pre><code>
 # argument:
 # $1: n_way
@@ -152,21 +151,18 @@ Use `train_hal.py` and `model_hal.py` to train various hallucinators using the f
 # ----------------
 # $5: z_dim/fc_dim
 # $6: n_train_class
-# $7: label_key (image_labels_id for CMU-multi-pie, image_labels for other datasets)
-# $8: exp_tag (cv/final for imagenet-1k, common for other datasets)
+# $7: exp_tag (cv/final for imagenet-1k, common for other datasets)
 # ----------------
-# $9: num_epoch
-# $10: extractor_folder (ext[1-9] from Step 1, must be specified)
-# $11: num_parallel_calls
-
-CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 image_labels common 30 ext2 4 > ./log_hal_GAN_withPro_m5n1a3q20_ep30_ext2
-CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_AFHN_1_tf1_ar1.sh 5 1 3 20 512 64 image_labels common 10 ext2 4 > ./log_hal_AFHN_1_tf1_ar1_m5n1a3q20_ep10_ext2
-CUDA_VISIBLE_DEVICES=0 sh script_folder/script_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0.sh 5 1 3 20 512 64 image_labels common 10 ext2 4 > ./log_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a3q20_ep10_ext2
+# $8: num_epoch
+# $9: extractor_folder (ext[1-9] from Step 1, must be specified)
+# $10: num_parallel_calls
+CUDA_VISIBLE_DEVICES=2 sh script_folder/script_hal_GAN_withPro.sh 5 1 3 20 512 64 common 100 ext1 4 > ./log_hal_GAN_withPro_m5n1a3q20_ep100_ext1
+CUDA_VISIBLE_DEVICES=3 sh script_folder/script_hal_AFHN_1_tf1_ar1.sh 5 1 3 20 512 64 common 100 ext1 4 > ./log_hal_AFHN_1_tf1_ar1_m5n1a3q20_ep100_ext1
+CUDA_VISIBLE_DEVICES=4 sh script_folder/script_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0.sh 5 1 3 20 512 64 common 100 ext1 4 > ./log_hal_PoseRef_1_1_1_0_0_0_0_g0_tf0_m5n1a3q20_ep100_ext1
 </code></pre>
 
 ### Step 3
-Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation class (or each novel class), augment each class using the trained hallucinator, train a linear classifier using all training base-class features and the augmented validation (or novel) features, and finally test on the features extracted from the test splits (i.e., `base_test.json`, `val_test.json`, and `novel_test.json`).
-
+Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation class (or each novel class), augment each class using the trained hallucinator (specified in script_fsl_XXX.sh), train a linear classifier using all training base-class features and the augmented validation (or novel) features, and finally test on the features extracted from the test splits (i.e., `base_test.json`, `val_test.json`, and `novel_test.json`).
 <pre><code>
 # argument:
 # $1: n_shot (01, 02, 05, 10, or 20)
@@ -174,11 +170,19 @@ Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation cl
 # $3: z_dim/fc_dim
 # $4: n_class
 # $5: n_base_class
-# $6: label_key (image_labels_id for CMU-multi-pie, image_labels for other datasets)
-# $7: extractor_folder (ext[1-9] from Step 1, must be specified)
-# $8: exp_tag (cv/final for imagenet-1k, common for other datasets)
-# $9: num_ite (10000 for imagenet-1k, 2000 for other datasets)
-# $10: bsize (1000 for imagenet-1k, 200 for other datasets)
-CUDA_VISIBLE_DEVICES=0 sh script_folder/script_fsl_baseline.sh 01 1 512 80 64 image_labels ext2 val 2000 200 > ./results_baseline_val_shot01_ext2
-CUDA_VISIBLE_DEVICES=1 sh script_folder/script_fsl_GAN.sh 01 5 512 80 64 image_labels ext2 val 2000 200 > ./results_GAN_a5_val_shot01_ext2
+# $6: extractor_folder (ext[1-9] from Step 1, must be specified)
+# $7: exp_tag (cv/final for imagenet-1k, val/novel for other datasets)
+# $8: num_ite (10000 for imagenet-1k, 2000 for other datasets)
+# $9: bsize (1000 for imagenet-1k, 200 for other datasets)
+CUDA_VISIBLE_DEVICES=1 sh script_folder/script_fsl_baseline.sh 01 1 512 80 64 ext1 val 2000 200 > ./results_baseline_val_shot01_ext1
+CUDA_VISIBLE_DEVICES=1 sh script_folder/script_fsl_GAN.sh 01 5 512 80 64 ext1 val 2000 200 > ./results_GAN_a5_val_shot01_ext1
 </code></pre>
+
+### Collect results
+The output files in Step 3 can be parsed by `acc_parser.py` as follows:
+<pre><code>
+egrep 'WARNING: the output path|top-5 test accuracy' ./results_baseline_val_shot01_ext1 > ./results_baseline_val_shot01_ext1_acc
+python3 script_folder/acc_parser.py ./results_baseline_val_shot01_ext1_acc
+</code></pre>
+Each row contains the used learning rate, n_shot, n_aug, the averaged novel-class accuracy and its std, and the averaged all-class accuracy and its std.
+
