@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import numpy as np
-from model import HAL_PN_baseline, HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_PoseRef
+from model_episodic import HAL_PN_baseline, HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_PoseRef
 import os, re, glob
 
 import argparse
@@ -27,7 +27,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--result_path', type=str, help='Path to save all results')
     parser.add_argument('--json_path', type=str, help='Folder name containing base.json, val.json, and novel.json')
-    parser.add_argument('--extractor_path', type=str, help='Folder name of the pre-trained feature extractor model')
+    parser.add_argument('--extractor_folder', type=str, help='Folder name of the pre-trained feature extractor model')
     parser.add_argument('--hallucinator_name', type=str, help='Folder name to save hallucinator models and learning curves')
     parser.add_argument('--l2scale', default=1e-3, type=float, help='L2-regularizer scale')
     parser.add_argument('--n_way', default=40, type=int, help='Number of classes in the support set')
@@ -52,7 +52,7 @@ def main():
     parser.add_argument('--patience', default=20, type=int, help='Patience for early-stop mechanism')
     parser.add_argument('--n_ite_per_epoch', default=600, type=int, help='Number of iterations (episodes) per epoch')
     parser.add_argument('--fc_dim', default=512, type=int, help='Fully-connected dimensions of the hidden layers of the MLP classifier')
-    parser.add_argument('--img_size', default=84, type=int, help='Image size H and W')
+    parser.add_argument('--img_size', default=224, type=int, help='Image size H and W')
     parser.add_argument('--c_dim', default=3, type=int, help='Image size C')
     parser.add_argument('--z_dim', default=100, type=int, help='Dimension of the input noise to the GAN-based hallucinator')
     parser.add_argument('--z_std', default=1.0, type=float, help='Standard deviation of the input noise to the GAN-based hallucinator')
@@ -74,7 +74,7 @@ def main():
     parser.add_argument('--AFHN', action='store_true', help='Use AFHN if present')
     parser.add_argument('--PoseRef', action='store_true', help='Use pose-ref-based hallucinator if present')
     parser.add_argument('--debug', action='store_true', help='Debug mode if present')
-    parser.add_argument('--label_key', type=str, help='image_labels or image_labels_id')
+    parser.add_argument('--label_key', default='image_labels', type=str, help='image_labels or image_labels_id')
     parser.add_argument('--gpu_frac', default=0.5, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
     parser.add_argument('--with_BN', action='store_true', help='Use batch_norm() in the feature extractor mode if present')
     parser.add_argument('--with_pro', action='store_true', help='Use additional embedding network for prototypical network if present')
@@ -246,7 +246,7 @@ def train(args):
             print('------------------[all_regs]------------------')
             for var in all_regs:
                 print(var.name)
-        res = net.train(ext_from=os.path.join(args.extractor_path, 'models'),
+        res = net.train(ext_from=os.path.join(args.extractor_folder, 'models'),
                         num_epoch_pretrain=args.num_epoch_pretrain,
                         lr_start_pre=args.lr_start_pre,
                         lr_decay_pre=args.lr_decay_pre,

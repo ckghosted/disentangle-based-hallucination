@@ -6,11 +6,11 @@ do
         do
             for n_query_all in $4
             do
-                python3 script_folder/train.py \
+                python3 script_folder/train_episodic.py \
                     --result_path . \
                     --json_path json_folder \
-                    --extractor_path $13 \
-                    --hallucinator_name HAL_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_m${n_way}n${n_shot}a${n_aug}q${n_query_all}_ep$9hal$10joint$11ite$12_$13_$14_noPro_lr1e5_testAug$16 \
+                    --extractor_folder $13 \
+                    --hallucinator_name HAL_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_m${n_way}n${n_shot}a${n_aug}q${n_query_all}_ep$9hal$10joint$11ite$12_$13_$14_noPro_lr1e5_testAug$15 \
                     --l2scale 0.0 \
                     --num_epoch_pretrain $14 \
                     --bsize 128 \
@@ -29,15 +29,12 @@ do
                     --n_shot ${n_shot} \
                     --n_aug ${n_aug} \
                     --n_query_all ${n_query_all} \
-                    --n_aug_t $16 \
+                    --n_aug_t $15 \
                     --z_dim $5 \
                     --fc_dim $5 \
-                    --img_size 224 \
-                    --c_dim 3 \
                     --n_base_class $6 \
                     --n_valid_class $7 \
                     --n_novel_class $8 \
-                    --label_key image_labels \
                     --lambda_meta 1.0 \
                     --lambda_recon 1.0 \
                     --lambda_consistency 1.0 \
@@ -50,7 +47,7 @@ do
                     --gpu_frac 1.0 \
                     --PoseRef \
                     --with_BN \
-                    --num_parallel_calls $15
+                    --num_parallel_calls $16
             done
         done
     done

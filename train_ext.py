@@ -29,11 +29,11 @@ def main():
     parser.add_argument('--fc_dim', default=1024, type=int, help='Dimension of the hidden layer in the classifier (not used if only a single layer with softmax)')
     parser.add_argument('--alpha_center', default=0.1, type=float, help='Center update rate')
     parser.add_argument('--lambda_center', default=0.0, type=float, help='Center loss weight')
-    parser.add_argument('--used_opt', default='sgd', type=str, help='Used optimizer (sgd/momentum/adam)')
+    parser.add_argument('--used_opt', default='adam', type=str, help='Used optimizer (sgd/momentum/adam)')
     ## training parameters
     parser.add_argument('--train_path', type=str, help='Path of the training json file')
-    parser.add_argument('--test_path', type=str, help='Path of the testing json file')
-    parser.add_argument('--label_key', type=str, help='Label key name in the json files, normally image_labels or image_labels_id')
+    parser.add_argument('--test_path', default='None', type=str, help='Path of the testing json file')
+    parser.add_argument('--label_key', default='image_labels', type=str, help='Label key name in the json files, normally image_labels or image_labels_id')
     parser.add_argument('--num_epoch', default=100, type=int, help='Max number of training epochs')
     parser.add_argument('--bsize', default=128, type=int, help='Batch size')
     parser.add_argument('--lr_start', default=1e-3, type=float, help='Initial learning rate')
@@ -114,8 +114,14 @@ def extract(args, used_model, img_size):
     tf.reset_default_graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
     
+    training_file = os.path.basename(args.train_path)
     training_file_dir = os.path.dirname(args.train_path)
-    file_to_extract = ['base_train.json', 'base_test.json', 'val_train.json', 'val_test.json', 'novel_train.json', 'novel_test.json']
+    if training_file == 'base_train.json':
+        file_to_extract = ['base_train.json', 'base_test.json', 'val_train.json', 'val_test.json', 'novel_train.json', 'novel_test.json']
+    elif training_file == 'base.json':
+        file_to_extract = ['base.json', 'val.json', 'novel.json']
+    else:
+        assert 0
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         net = model_dict[used_model](sess,
                                      model_name=args.model_name,
