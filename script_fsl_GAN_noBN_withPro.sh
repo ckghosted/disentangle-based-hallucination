@@ -15,7 +15,7 @@ do
                     do
                         python3 ./script_folder/train_fsl.py \
                             --result_path . \
-                            --model_name FSL_PN_GAN_shot${n_shot}aug${n_aug}_$6_lr${lr_base}e${lr_power}_ite${num_ite}_${ite_idx} \
+                            --model_name FSL_PN_GAN_noBN_withPro_shot${n_shot}aug${n_aug}_$6_lr${lr_base}e${lr_power}_ite${num_ite}_${ite_idx} \
                             --extractor_folder $6 \
                             --hallucinator_name baseline \
                             --n_class $4 \
@@ -31,7 +31,7 @@ do
                             --fc_dim $3 \
                             --exp_tag $7 \
                             --gpu_frac 1.0 \
-                            --with_BN \
+                            --with_pro \
                             --ite_idx ${ite_idx} \
                             --GAN \
                             --debug

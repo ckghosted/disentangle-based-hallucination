@@ -26,7 +26,6 @@ do
                         --fc_dim $3 \
                         --exp_tag $7 \
                         --gpu_frac 1.0 \
-                        --with_BN \
                         --ite_idx ${ite_idx} \
                         --debug
                 done
