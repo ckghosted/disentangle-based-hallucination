@@ -36,7 +36,7 @@ def main():
     parser.add_argument('--num_epoch', default=100, type=int, help='Number of epochs')
     parser.add_argument('--lr_start', default=1e-5, type=float, help='Initial learning rate for episodic training')
     parser.add_argument('--lr_decay', default=0.5, type=float, help='Learning rate decay factor for episodic training')
-    parser.add_argument('--lr_decay_step', default=20, type=int, help='Number of epochs per learning rate decay for episodic training')
+    parser.add_argument('--lr_decay_step', default=0, type=int, help='Number of epochs per learning rate decay for episodic training, default 0: use num_epoch//3')
     parser.add_argument('--patience', default=20, type=int, help='Patience for early-stop mechanism')
     parser.add_argument('--n_ite_per_epoch', default=600, type=int, help='Number of iterations (episodes) per epoch')
     parser.add_argument('--fc_dim', default=512, type=int, help='Fully-connected dimensions of the hidden layers of the MLP classifier')
@@ -76,7 +76,9 @@ def train(args):
         train_pickled_fname = 'final_base_train_feat'
     elif args.exp_tag == 'common':
         train_pickled_fname = 'base_train_feat'
+        val_pickled_fname = 'val_train_feat'
     train_path = os.path.join(args.result_path, args.extractor_folder, train_pickled_fname)
+    val_path = os.path.join(args.result_path, args.extractor_folder, val_pickled_fname)
     
     tf.reset_default_graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
@@ -149,14 +151,13 @@ def train(args):
                                  model_name=args.hallucinator_name,
                                  result_path=args.result_path,
                                  train_path=train_path,
+                                 val_path=val_path,
                                  label_key=args.label_key,
                                  n_way=args.n_way,
                                  n_shot=args.n_shot,
                                  n_aug=args.n_aug,
                                  n_query_all=args.n_query_all,
                                  fc_dim=args.fc_dim,
-                                 z_dim=args.z_dim,
-                                 z_std=args.z_std,
                                  l2scale=args.l2scale,
                                  n_train_class=args.n_train_class,
                                  with_BN=args.with_BN,
@@ -186,11 +187,15 @@ def train(args):
             print('------------------[all_regs]------------------')
             for var in all_regs:
                 print(var.name)
+        if args.lr_decay_step == 0:
+            lr_decay_step = args.num_epoch//3
+        else:
+            lr_decay_step = args.lr_decay_step
         res = net.train(num_epoch=args.num_epoch,
                         n_ite_per_epoch=args.n_ite_per_epoch,
                         lr_start=args.lr_start,
                         lr_decay=args.lr_decay,
-                        lr_decay_step=args.lr_decay_step,
+                        lr_decay_step=lr_decay_step,
                         patience=args.patience)
     np.save(os.path.join(args.result_path, args.hallucinator_name, 'results.npy'), res)
     

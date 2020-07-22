@@ -53,7 +53,7 @@ class FSL(object):
                  bnDecay=0.9,
                  epsilon=1e-5,
                  l2scale=0.001,
-                 used_opt='sgd'):
+                 used_opt='adam'):
         self.sess = sess
         self.model_name = model_name
         self.result_path = result_path
@@ -290,6 +290,9 @@ class FSL(object):
                     logits_all = np.concatenate((logits_all, logits), axis=0)
             all_novel_classes = sorted(set(labels_novel_test))
             all_base_classes = sorted(set(labels_base_test))
+            # print('all_novel_classes:', all_novel_classes)
+            # print('all_base_classes:', all_base_classes)
+
             is_novel = np.array([(i in all_novel_classes) for i in range(self.n_class)], dtype=int)
             is_base = np.array([(i in all_base_classes) for i in range(self.n_class)], dtype=int)
             is_all = np.array([(i in all_novel_classes or i in all_base_classes) for i in range(self.n_class)], dtype=int)
@@ -307,19 +310,51 @@ class FSL(object):
             score = np.exp(logits_all) / np.repeat(np.sum(np.exp(logits_all), axis=1, keepdims=True), repeats=self.n_class, axis=1)
             score_novel = score * is_novel
             score_all = score * is_all
-            
+            # print('score.shape:', score.shape)
+            # print('score_novel.shape:', score_novel.shape)
+            # print('score_all.shape:', score_all.shape)
+
+            # print()
+            # print('labels_test:', labels_test)
+            # print()
+
             y_pred_all = np.argmax(score_all, axis=1)
             acc_test_all = accuracy_score(labels_test, y_pred_all)
             best_n_all = np.argsort(score_all, axis=1)[:,-n_top:]
             top_n_acc_test_all = np.mean([(labels_test[idx] in best_n_all[idx]) for idx in range(features_len_all)])
             
-            y_pred_novel = np.argmax(score_novel, axis=1)
+            y_pred_novel_only = np.argmax(score_novel, axis=1)
+            acc_test_novel_only = accuracy_score(labels_test[0:features_len_novel], y_pred_novel_only[0:features_len_novel])
+            best_n_novel_only = np.argsort(score_novel, axis=1)[:,-n_top:]
+            top_n_acc_test_novel_only = np.mean([(labels_test[idx] in best_n_novel_only[idx]) for idx in range(features_len_novel)])
+
+            y_pred_novel = np.argmax(score_all, axis=1)
             acc_test_novel = accuracy_score(labels_test[0:features_len_novel], y_pred_novel[0:features_len_novel])
-            best_n_novel = np.argsort(score_novel, axis=1)[:,-n_top:]
+            best_n_novel = np.argsort(score_all, axis=1)[:,-n_top:]
             top_n_acc_test_novel = np.mean([(labels_test[idx] in best_n_novel[idx]) for idx in range(features_len_novel)])
+
+            # print()
+            # print('score_all[0]:', score_all[0])
+            # print()
+            # print()
+            # print('score_novel[0]:', score_novel[0])
+            # print()
+            # print()
+            # print('y_pred_novel_only:', y_pred_novel)
+            # print()
+            # print()
+            # print('y_pred_novel:', y_pred_novel)
+            # print()
+            # print()
+            # print('best_n_novel_only:', best_n_novel)
+            # print()
+            # print()
+            # print('best_n_novel:', best_n_novel)
+            # print()
             
-            print('test loss: %f, test accuracy: %f, top-%d test accuracy: %f, novel test accuracy: %f, novel top-%d test accuracy: %f' % \
+            print('test loss: %f, test accuracy: %f, top-%d test accuracy: %f, novel-only test accuracy: %f, novel-only top-%d test accuracy: %f, novel test accuracy: %f, novel top-%d test accuracy: %f' % \
                   (np.mean(loss_test_batch), acc_test_all, n_top, top_n_acc_test_all,
+                                             acc_test_novel_only, n_top, top_n_acc_test_novel_only,
                                              acc_test_novel, n_top, top_n_acc_test_novel))
     
     def load(self, init_from, init_from_ckpt=None):
@@ -348,7 +383,7 @@ class FSL_PN_GAN(FSL):
                  bnDecay=0.9,
                  epsilon=1e-5,
                  l2scale=0.001,
-                 used_opt='sgd',
+                 used_opt='adam',
                  z_dim=100,
                  z_std=1.0,
                  with_BN=False,
@@ -589,7 +624,7 @@ class FSL_PN_GAN(FSL):
             _, loss, logits = self.sess.run([self.opt_fsl_cls, self.loss, self.logits],
                                             feed_dict={self.features: batch_features,
                                                        self.labels: batch_labels,
-                                                       self.bn_train: False,
+                                                       self.bn_train: True,
                                                        self.learning_rate: learning_rate})
             loss_train.append(loss)
             y_true = batch_labels
@@ -634,7 +669,7 @@ class FSL_PN_GAN2(FSL_PN_GAN):
                  bnDecay=0.9,
                  epsilon=1e-5,
                  l2scale=0.001,
-                 used_opt='sgd',
+                 used_opt='adam',
                  z_dim=100,
                  z_std=1.0,
                  with_BN=False,
@@ -683,7 +718,7 @@ class FSL_PN_AFHN(FSL_PN_GAN):
                  bnDecay=0.9,
                  epsilon=1e-5,
                  l2scale=0.001,
-                 used_opt='sgd',
+                 used_opt='adam',
                  z_dim=100,
                  z_std=1.0,
                  with_BN=False,
@@ -702,7 +737,8 @@ class FSL_PN_AFHN(FSL_PN_GAN):
                                           z_std,
                                           with_BN,
                                           with_pro)
-    
+    ## "We implement the generator G as a two-layer MLP, with LeakyReLU activation for the first layer
+    ##  and ReLU activation for the second one. The dimension of the hidden layer is 1024." (K. Li, CVPR 2020)
     def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
             x = linear_identity(x, 1024, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
@@ -726,7 +762,7 @@ class FSL_PN_PoseRef(FSL):
                  bnDecay=0.9,
                  epsilon=1e-5,
                  l2scale=0.001,
-                 used_opt='sgd',
+                 used_opt='adam',
                  n_gallery_per_class=0,
                  n_base_lb_per_novel=5,
                  with_BN=False,
@@ -884,7 +920,7 @@ class FSL_PN_PoseRef(FSL):
         train_novel_dict = unpickle(train_novel_path)
         features_novel_train = train_novel_dict['features']
         labels_novel_train = [int(s) for s in train_novel_dict[label_key]]
-        fnames_novel_train = train_novel_dict['image_names']
+        # fnames_novel_train = train_novel_dict['image_names']
         train_base_dict = unpickle(train_base_path)
         n_feat_per_base = int(len(train_base_dict[label_key]) / len(set(train_base_dict[label_key])))
         features_base_train = train_base_dict['features']
@@ -901,7 +937,7 @@ class FSL_PN_PoseRef(FSL):
         train_base_dict_all = unpickle(os.path.join(os.path.dirname(train_base_path), 'base_train_feat'))
         features_base_train_all = train_base_dict_all['features']
         labels_base_train_all = [int(s) for s in train_base_dict_all[label_key]]
-        fnames_base_train_all = train_base_dict_all['image_names']
+        # fnames_base_train_all = train_base_dict_all['image_names']
         if self.n_gallery_per_class > 0:
             ### load the index array for the gallery set
             if self.use_canonical_gallery:
@@ -915,17 +951,17 @@ class FSL_PN_PoseRef(FSL):
                 gallery_index_array = np.load(gallery_index_path, allow_pickle=True)
                 features_base_gallery = features_base_train_all[gallery_index_array]
                 labels_base_gallery = [labels_base_train_all[idx] for idx in range(len(labels_base_train)) if idx in gallery_index_array]
-                fnames_base_gallery = [fnames_base_train_all[idx] for idx in range(len(labels_base_train)) if idx in gallery_index_array]
+                # fnames_base_gallery = [fnames_base_train_all[idx] for idx in range(len(labels_base_train)) if idx in gallery_index_array]
                 # print('labels_base_gallery:', labels_base_gallery)
             else:
                 print('Load gallery_index_array fail ==> use the whole base-class dataset as the gallery set')
                 features_base_gallery = features_base_train_all
                 labels_base_gallery = labels_base_train_all
-                fnames_base_gallery = fnames_base_train_all
+                # fnames_base_gallery = fnames_base_train_all
         else:
             features_base_gallery = features_base_train_all
             labels_base_gallery = labels_base_train_all
-            fnames_base_gallery = fnames_base_train_all
+            # fnames_base_gallery = fnames_base_train_all
         candidate_indexes_each_lb_gallery = {}
         for lb in sorted(set(labels_base_gallery)):
             candidate_indexes_each_lb_gallery[lb] = [idx for idx in range(len(labels_base_gallery)) if labels_base_gallery[idx] == lb]
@@ -975,7 +1011,7 @@ class FSL_PN_PoseRef(FSL):
                 else:
                     selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
                 selected_indexes_novel[lb] = selected_indexes_per_lb
-                fnames_novel.append(fnames_novel_train[selected_indexes_per_lb[0]])
+                # fnames_novel.append(fnames_novel_train[selected_indexes_per_lb[0]])
             #### Make the "real_features" array
             n_hal = n_aug - n_shot
             real_features = np.empty([len(all_novel_labels), n_shot, self.fc_dim])
@@ -1018,7 +1054,7 @@ class FSL_PN_PoseRef(FSL):
                 lbs_for_pose_ref = [closest_class_dict[lb][idx][0] for idx in range(self.n_base_lb_per_novel)]
                 candidate_indexes_for_this_novel = [item for sublist in [candidate_indexes_each_lb_gallery[i] for i in lbs_for_pose_ref] for item in sublist]
                 selected_indexes[lb] = list(np.random.choice(candidate_indexes_for_this_novel, n_hal, replace=False))
-                fnames_pose_feat.append(fnames_base_gallery[selected_indexes[lb][0]])
+                # fnames_pose_feat.append(fnames_base_gallery[selected_indexes[lb][0]])
                 pose_feat_dict[lb] = features_base_gallery[selected_indexes[lb]]
             pose_feat = np.concatenate([pose_feat_dict[lb] for lb in all_novel_labels])
 
@@ -1047,8 +1083,8 @@ class FSL_PN_PoseRef(FSL):
             n_novel_plot = 10
             idx_list_for_plot = np.random.choice(len(all_novel_labels), n_novel_plot, replace=False)
             fnames_hal_nearest = []
-            for lb_idx in idx_list_for_plot:
-                fnames_hal_nearest.append(fnames_novel_train[(np.sum(np.abs(features_novel_train - feature_hallucinated_all[lb_idx*n_hal]), axis=1)).argmin()])
+            # for lb_idx in idx_list_for_plot:
+                # fnames_hal_nearest.append(fnames_novel_train[(np.sum(np.abs(features_novel_train - feature_hallucinated_all[lb_idx*n_hal]), axis=1)).argmin()])
             #### combine hallucinated and real features to make the final novel feature set
             features_novel_final = np.empty([n_aug * len(all_novel_labels), self.fc_dim])
             labels_novel_final = []
@@ -1063,32 +1099,32 @@ class FSL_PN_PoseRef(FSL):
                 lb_counter += 1
             
             #### Plot some hallucination examples if not in test_mode (if in test_mode, we have visualize() in train_fsl_infer.py)
-            if not test_mode:
-                x_dim = 84
-                img_array = np.empty((3*n_novel_plot, x_dim, x_dim, 3), dtype='uint8')
-                lb_counter = 0
-                for lb_idx in idx_list_for_plot:
-                    # fnames_novel
-                    file_path = os.path.join(image_path, fnames_novel[lb_idx])
-                    img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-                    img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    img_array[lb_counter,:] = img
-                    # fnames_pose_feat
-                    file_path = os.path.join(image_path, fnames_pose_feat[lb_idx])
-                    img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-                    img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    img_array[lb_counter+n_novel_plot,:] = img
-                    # fnames_hal_nearest
-                    file_path = os.path.join(image_path, fnames_hal_nearest[lb_counter])
-                    img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-                    img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    img_array[lb_counter+2*n_novel_plot,:] = img
-                    lb_counter += 1
-                fig = plot(img_array, 3, n_novel_plot, x_dim=x_dim)
-                plt.savefig(os.path.join(self.result_path, self.model_name, 'samples.png'), bbox_inches='tight')
+            # if not test_mode:
+            #     x_dim = 84
+            #     img_array = np.empty((3*n_novel_plot, x_dim, x_dim, 3), dtype='uint8')
+            #     lb_counter = 0
+            #     for lb_idx in idx_list_for_plot:
+            #         # fnames_novel
+            #         file_path = os.path.join(image_path, fnames_novel[lb_idx])
+            #         img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+            #         img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+            #         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            #         img_array[lb_counter,:] = img
+            #         # fnames_pose_feat
+            #         file_path = os.path.join(image_path, fnames_pose_feat[lb_idx])
+            #         img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+            #         img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+            #         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            #         img_array[lb_counter+n_novel_plot,:] = img
+            #         # fnames_hal_nearest
+            #         file_path = os.path.join(image_path, fnames_hal_nearest[lb_counter])
+            #         img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+            #         img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+            #         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            #         img_array[lb_counter+2*n_novel_plot,:] = img
+            #         lb_counter += 1
+            #     fig = plot(img_array, 3, n_novel_plot, x_dim=x_dim)
+            #     plt.savefig(os.path.join(self.result_path, self.model_name, 'samples.png'), bbox_inches='tight')
 
         print('features_novel_final.shape:', features_novel_final.shape)
         print('len(labels_novel_final):', len(labels_novel_final))

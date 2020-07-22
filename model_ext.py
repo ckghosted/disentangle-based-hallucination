@@ -312,6 +312,7 @@ class BasicCls(object):
             features_dict = {}
             features_dict['features'] = features_all
             features_dict[self.label_key] = data[self.label_key]
+            features_dict['image_names'] = data['image_names']
             dopickle(features_dict, os.path.join(self.result_path, self.model_name, saved_filename))
             # return features_all ## return for debug
     

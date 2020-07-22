@@ -6,6 +6,7 @@ import tensorflow as tf
 import numpy as np
 from model_fsl import FSL
 from model_fsl import FSL_PN_GAN, FSL_PN_GAN2
+from model_fsl import FSL_PN_AFHN
 from model_fsl import FSL_PN_PoseRef
 import os, re, glob
 
@@ -135,6 +136,18 @@ def train(args):
                               z_std=args.z_std,
                               with_BN=args.with_BN,
                               with_pro=args.with_pro)
+        elif args.AFHN:
+            net = FSL_PN_AFHN(sess,
+                              model_name=args.model_name,
+                              result_path=os.path.join(args.result_path, args.hallucinator_name),
+                              fc_dim=args.fc_dim,
+                              n_class=args.n_class,
+                              n_base_class=args.n_base_class,
+                              l2scale=args.l2scale,
+                              z_dim=args.z_dim,
+                              z_std=args.z_std,
+                              with_BN=args.with_BN,
+                              with_pro=args.with_pro)
         elif args.PoseRef:
             net = FSL_PN_PoseRef(sess,
                                  model_name=args.model_name,
@@ -249,6 +262,18 @@ def inference(args):
                              with_pro=args.with_pro)
         elif args.GAN2:
             net = FSL_PN_GAN2(sess,
+                              model_name=args.model_name,
+                              result_path=os.path.join(args.result_path, args.hallucinator_name),
+                              fc_dim=args.fc_dim,
+                              n_class=args.n_class,
+                              n_base_class=args.n_base_class,
+                              l2scale=args.l2scale,
+                              z_dim=args.z_dim,
+                              z_std=args.z_std,
+                              with_BN=args.with_BN,
+                              with_pro=args.with_pro)
+        elif args.AFHN:
+            net = FSL_PN_AFHN(sess,
                               model_name=args.model_name,
                               result_path=os.path.join(args.result_path, args.hallucinator_name),
                               fc_dim=args.fc_dim,
