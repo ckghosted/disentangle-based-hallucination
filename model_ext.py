@@ -107,19 +107,19 @@ class BasicCls(object):
             base_label_list = np.array([label_mapping[old_lb] for old_lb in base_label_list_raw])
             print('new labeling:')
             print(sorted(set(base_label_list)))
-            #### split 'base' data into 'train' and 'test' by 4:1
-            # data_len = len(base_image_list)
-            # arr_all = np.arange(data_len)
-            # np.random.shuffle(arr_all)
-            # train_image_list = [base_image_list[i] for i in arr_all[0:int(data_len*0.8)]]
-            # train_label_list = [base_label_list[i] for i in arr_all[0:int(data_len*0.8)]]
-            # nBatches = int(np.ceil(len(train_image_list) / self.bsize))
-            # test_image_list = [base_image_list[i] for i in arr_all[int(data_len*0.8):int(data_len)]]
-            # test_label_list = [base_label_list[i] for i in arr_all[int(data_len*0.8):int(data_len)]]
-            # nBatches_test = int(np.ceil(len(test_image_list) / self.bsize))
-            self.train_image_list = base_image_list
-            self.train_label_list = base_label_list
+            #### split 'base' data into 'train' and 'test' by 9:1
+            data_len = len(base_image_list)
+            arr_all = np.arange(data_len)
+            np.random.shuffle(arr_all)
+            self.train_image_list = [base_image_list[i] for i in arr_all[0:int(data_len*0.9)]]
+            self.train_label_list = [base_label_list[i] for i in arr_all[0:int(data_len*0.9)]]
             self.nBatches = int(np.ceil(len(self.train_image_list) / self.bsize))
+            self.test_image_list = [base_image_list[i] for i in arr_all[int(data_len*0.9):int(data_len)]]
+            self.test_label_list = [base_label_list[i] for i in arr_all[int(data_len*0.9):int(data_len)]]
+            self.nBatches_test = int(np.ceil(len(self.test_image_list) / self.bsize))
+            # self.train_image_list = base_image_list
+            # self.train_label_list = base_label_list
+            # self.nBatches = int(np.ceil(len(self.train_image_list) / self.bsize))
     
     def _parse_function(self, filename, label):
         x = tf.read_file(filename)
@@ -166,8 +166,12 @@ class BasicCls(object):
         ### [2020/06/12] follow https://github.com/taki0112/DRIT-Tensorflow/blob/master/DRIT.py to use placeholder for testing or extraction
         self.input_images_test = tf.placeholder(tf.float32, shape=[None, self.img_size, self.img_size, self.c_dim], name='input_images_test')
         self.labels_test = tf.placeholder(tf.int32, shape=[None], name='labels_test')
+        self.labels_vec_test = tf.one_hot(self.labels_test, self.n_class)
         self.feat_test = self.extractor(self.input_images_test, self.bn_train, self.with_BN, reuse=True)
         self.logits_test = self.classifier(self.feat_test, self.bn_train, reuse=True)
+        self.loss_ce_test = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels_vec_test,
+                                                                                   logits=self.logits_test,
+                                                                                   name='loss_ce_test'))
         self.acc_test = tf.nn.in_top_k(self.logits_test, self.labels_test, k=1)
         
         ### loss
@@ -261,13 +265,31 @@ class BasicCls(object):
                 acc_train_batch.append(np.mean(acc))
             loss_train.append(np.mean(loss_train_batch))
             acc_train.append(np.mean(acc_train_batch))
-            print('Epoch: %d (lr=%f), loss_train: %f, acc_train: %f' % \
-                  (epoch, lr, loss_train[-1], acc_train[-1]))
+
+            #### [2020/07/22] add validation using data specified in 'base_test.json'
+            loss_test_batch = []
+            acc_test_batch = []
+            for idx in tqdm.tqdm(range(self.nBatches_test)):
+                batch_files = self.test_image_list[idx*self.bsize:(idx+1)*self.bsize]
+                batch = [get_image_resize_normalize(batch_file, self.img_size) for batch_file in batch_files]
+                batch_images = np.array(batch).astype(np.float32)
+                batch_labels = self.test_label_list[idx*self.bsize:(idx+1)*self.bsize]
+                loss, acc = self.sess.run([self.loss_ce_test, self.acc_test],
+                                          feed_dict={self.input_images_test: batch_images,
+                                                     self.labels_test: batch_labels,
+                                                     self.bn_train: False})
+                loss_test_batch.append(loss)
+                acc_test_batch.append(np.mean(acc))
+            loss_test.append(np.mean(loss_test_batch))
+            acc_test.append(np.mean(acc_test_batch))
+
+            print('Epoch: %d (lr=%f), loss_train: %f, acc_train: %f, loss_test: %f, acc_test: %f' % \
+                  (epoch, lr, loss_train[-1], acc_train[-1], loss_test[-1], acc_test[-1]))
         print('time: %4.4f' % (time.time() - start_time))
         self.saver.save(self.sess,
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=epoch)
-        return [loss_train, acc_train]
+        return [loss_train, acc_train, loss_test, acc_test]
     
     def extract(self,
                 file_path,
@@ -299,7 +321,7 @@ class BasicCls(object):
             # pred_all = []
             for idx in tqdm.tqdm(range(nBatches)):
                 batch_files = data_image_list[idx*self.bsize:(idx+1)*self.bsize]
-                batch = [get_image_resize(batch_file, self.img_size) for batch_file in batch_files]
+                batch = [get_image_resize_normalize(batch_file, self.img_size) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
                 feat = self.sess.run(self.feat_test,
                                      feed_dict={self.input_images_test: batch_images, self.bn_train: False})

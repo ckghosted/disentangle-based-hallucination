@@ -22,6 +22,9 @@ pp = pprint.PrettyPrinter()
 
 get_stddev = lambda x, k_h, k_w: 1/math.sqrt(k_w*k_h*x.get_shape()[-1])
 
+MEAN = np.array([0.485, 0.456, 0.406])
+STD = np.array([0.229, 0.224, 0.225])
+
 def show_all_variables():
     model_vars = tf.trainable_variables()
     slim.model_analyzer.analyze_vars(model_vars, print_info=True)
@@ -32,15 +35,43 @@ def get_image(image_path, input_height=64, input_width=64,
     img = img / 255.0
     return img
 
-def get_image_resize(image_path, img_size):
+def get_image_resize(image_path, img_size, center_crop=False, aug_size=256):
     # img = skimage.io.imread(image_path)
     # img = img / 255.0
     # return skimage.transform.resize(img, [img_size, img_size])
     img = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
+    if center_crop:
+        img = cv2.resize(img, (aug_size, aug_size), interpolation=cv2.INTER_CUBIC)
+        # center crop from 256 into 224 ==> (x1, x2) = (y1, y2) = (16, 240)
+        x1 = (aug_size - img_size) / 2
+        x2 = x1 + img_size
+        y1 = (aug_size - img_size) / 2
+        y2 = y1 + img_size
+        img = img[x1:x2, y1:y2]
+    else:
+        img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = img / 255.0
     return img
+
+def get_image_resize_normalize(image_path, img_size, center_crop=False, aug_size=256):
+    # img = skimage.io.imread(image_path)
+    # img = img / 255.0
+    # return skimage.transform.resize(img, [img_size, img_size])
+    img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    if center_crop:
+        img = cv2.resize(img, (aug_size, aug_size), interpolation=cv2.INTER_CUBIC)
+        # center crop from 256 into 224 ==> (x1, x2) = (y1, y2) = (16, 240)
+        x1 = (aug_size - img_size) / 2
+        x2 = x1 + img_size
+        y1 = (aug_size - img_size) / 2
+        y2 = y1 + img_size
+        img = img[x1:x2, y1:y2]
+    else:
+        img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = img / 255.0
+    return (img - MEAN) / STD
 
 def get_image_resize_gray(image_path, img_size):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
