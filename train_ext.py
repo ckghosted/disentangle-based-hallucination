@@ -42,6 +42,7 @@ def main():
     parser.add_argument('--use_aug', action='store_true', help='Add basic image augmentation if present')
     parser.add_argument('--with_BN', action='store_true', help='Use batch normalization if present')
     parser.add_argument('--run_extraction', action='store_true', help='Extract features and saved as pickle files if present')
+    parser.add_argument('--center_crop', action='store_true', help='Center crop images for validation and feature extraction if present')
     
     args = parser.parse_args()
     ## Extract the used model from the specified model_name (start with Conv4/Conv6/ResNet10/ResNet18/ResNet34/ResNet50)
@@ -82,7 +83,8 @@ def train(args, used_model, img_size):
                                      lambda_center=args.lambda_center,
                                      used_opt=args.used_opt,
                                      use_aug=args.use_aug,
-                                     with_BN=args.with_BN)
+                                     with_BN=args.with_BN,
+                                     center_crop=args.center_crop)
         net.build_model()
         results = net.train(lr_start=args.lr_start,
                             lr_decay=args.lr_decay,

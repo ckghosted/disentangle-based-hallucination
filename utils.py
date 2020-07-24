@@ -43,9 +43,9 @@ def get_image_resize(image_path, img_size, center_crop=False, aug_size=256):
     if center_crop:
         img = cv2.resize(img, (aug_size, aug_size), interpolation=cv2.INTER_CUBIC)
         # center crop from 256 into 224 ==> (x1, x2) = (y1, y2) = (16, 240)
-        x1 = (aug_size - img_size) / 2
+        x1 = int((aug_size - img_size) / 2)
         x2 = x1 + img_size
-        y1 = (aug_size - img_size) / 2
+        y1 = int((aug_size - img_size) / 2)
         y2 = y1 + img_size
         img = img[x1:x2, y1:y2]
     else:
@@ -62,9 +62,9 @@ def get_image_resize_normalize(image_path, img_size, center_crop=False, aug_size
     if center_crop:
         img = cv2.resize(img, (aug_size, aug_size), interpolation=cv2.INTER_CUBIC)
         # center crop from 256 into 224 ==> (x1, x2) = (y1, y2) = (16, 240)
-        x1 = (aug_size - img_size) / 2
+        x1 = int((aug_size - img_size) / 2)
         x2 = x1 + img_size
-        y1 = (aug_size - img_size) / 2
+        y1 = int((aug_size - img_size) / 2)
         y2 = y1 + img_size
         img = img[x1:x2, y1:y2]
     else:

@@ -38,7 +38,8 @@ class BasicCls(object):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         self.sess = sess
         self.model_name = model_name
         self.result_path = result_path
@@ -58,6 +59,11 @@ class BasicCls(object):
         self.used_opt = used_opt
         self.use_aug = use_aug
         self.with_BN = with_BN
+
+        self.center_crop = center_crop
+        self.aug_size = int(self.img_size * 8 / 7)
+        self.img_mean = [0.485, 0.456, 0.406]
+        self.img_std = [0.229, 0.224, 0.225]
 
         ### prepare dataset file list
         ### (1) load train and test
@@ -128,15 +134,13 @@ class BasicCls(object):
         img = tf.cast(img, tf.float32) / 255
         if self.use_aug :
             seed = np.random.randint(0, 2 ** 31 - 1)
-            augment_size = int(self.img_size * 8 / 7) #### 224 --> 256; 84 --> 96
+            augment_size = self.aug_size #### 224 --> 256; 84 --> 96
             ori_image_shape = tf.shape(img)
             img = tf.image.random_flip_left_right(img, seed=seed)
             img = tf.image.resize_images(img, [augment_size, augment_size])
             img = tf.random_crop(img, ori_image_shape, seed=seed)
-            mean = [0.485, 0.456, 0.406]
-            std = [0.229, 0.224, 0.225]
-            image_mean = tf.constant(mean, dtype=tf.float32)
-            image_std = tf.constant(std, dtype=tf.float32)
+            image_mean = tf.constant(self.img_mean, dtype=tf.float32)
+            image_std = tf.constant(self.img_std, dtype=tf.float32)
             img = (img - image_mean) / image_std
         return img, label
     
@@ -271,7 +275,7 @@ class BasicCls(object):
             acc_test_batch = []
             for idx in tqdm.tqdm(range(self.nBatches_test)):
                 batch_files = self.test_image_list[idx*self.bsize:(idx+1)*self.bsize]
-                batch = [get_image_resize_normalize(batch_file, self.img_size) for batch_file in batch_files]
+                batch = [get_image_resize_normalize(batch_file, self.img_size, center_crop=self.center_crop, aug_size=self.aug_size) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
                 batch_labels = self.test_label_list[idx*self.bsize:(idx+1)*self.bsize]
                 loss, acc = self.sess.run([self.loss_ce_test, self.acc_test],
@@ -321,7 +325,7 @@ class BasicCls(object):
             # pred_all = []
             for idx in tqdm.tqdm(range(nBatches)):
                 batch_files = data_image_list[idx*self.bsize:(idx+1)*self.bsize]
-                batch = [get_image_resize_normalize(batch_file, self.img_size) for batch_file in batch_files]
+                batch = [get_image_resize_normalize(batch_file, self.img_size, center_crop=self.center_crop, aug_size=self.aug_size) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
                 feat = self.sess.run(self.feat_test,
                                      feed_dict={self.input_images_test: batch_images, self.bn_train: False})
@@ -373,7 +377,8 @@ class Conv4(BasicCls):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         super(Conv4, self).__init__(sess,
                                     model_name,
                                     result_path,
@@ -392,7 +397,8 @@ class Conv4(BasicCls):
                                     lambda_center,
                                     used_opt,
                                     use_aug,
-                                    with_BN)
+                                    with_BN,
+                                    center_crop)
     
     def extractor(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope("ext") as scope:
@@ -447,7 +453,8 @@ class Conv6(BasicCls):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         super(Conv6, self).__init__(sess,
                                     model_name,
                                     result_path,
@@ -466,7 +473,8 @@ class Conv6(BasicCls):
                                     lambda_center,
                                     used_opt,
                                     use_aug,
-                                    with_BN)
+                                    with_BN,
+                                    center_crop)
     
     def extractor(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope("ext") as scope:
@@ -531,7 +539,8 @@ class ResNet10(BasicCls):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         super(ResNet10, self).__init__(sess,
                                     model_name,
                                     result_path,
@@ -550,7 +559,8 @@ class ResNet10(BasicCls):
                                     lambda_center,
                                     used_opt,
                                     use_aug,
-                                    with_BN)
+                                    with_BN,
+                                    center_crop)
     
     def extractor(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope("ext") as scope:
@@ -603,7 +613,8 @@ class ResNet18(BasicCls):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         super(ResNet18, self).__init__(sess,
                                     model_name,
                                     result_path,
@@ -622,7 +633,8 @@ class ResNet18(BasicCls):
                                     lambda_center,
                                     used_opt,
                                     use_aug,
-                                    with_BN)
+                                    with_BN,
+                                    center_crop)
     
     def extractor(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope("ext") as scope:
@@ -679,7 +691,8 @@ class ResNet34(BasicCls):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         super(ResNet34, self).__init__(sess,
                                     model_name,
                                     result_path,
@@ -698,7 +711,8 @@ class ResNet34(BasicCls):
                                     lambda_center,
                                     used_opt,
                                     use_aug,
-                                    with_BN)
+                                    with_BN,
+                                    center_crop)
     
     def extractor(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope("ext") as scope:
@@ -763,7 +777,8 @@ class ResNet50(BasicCls):
                  lambda_center=0.0,
                  used_opt='sgd',
                  use_aug=True,
-                 with_BN=True):
+                 with_BN=True,
+                 center_crop=False):
         super(ResNet50, self).__init__(sess,
                                     model_name,
                                     result_path,
@@ -782,7 +797,8 @@ class ResNet50(BasicCls):
                                     lambda_center,
                                     used_opt,
                                     use_aug,
-                                    with_BN)
+                                    with_BN,
+                                    center_crop)
     
     def extractor(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope("ext") as scope:
