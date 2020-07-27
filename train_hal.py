@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import numpy as np
-from model_hal import HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_PoseRef
+from model_hal import HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_PoseRef, HAL_PN_PoseRef_Before
 import os, re, glob
 
 import argparse
@@ -64,6 +64,7 @@ def main():
     parser.add_argument('--with_pro', action='store_true', help='Use additional embedding network for prototypical network if present')
     parser.add_argument('--num_parallel_calls', default=4, type=int, help='Number of core used to prepare data')
     parser.add_argument('--exp_tag', type=str, help='cv, final, or common')
+    parser.add_argument('--ave_before_encode', action='store_true', help='Use class HAL_PN_PoseRef_Before (take feature average before class encoder) if present')
     args = parser.parse_args()
     train(args)
 
@@ -146,32 +147,60 @@ def train(args):
                               lambda_tf=args.lambda_tf,
                               lambda_ar=args.lambda_ar)
         elif args.PoseRef:
-            print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef')
-            net = HAL_PN_PoseRef(sess,
-                                 model_name=args.hallucinator_name,
-                                 result_path=args.result_path,
-                                 train_path=train_path,
-                                 val_path=val_path,
-                                 label_key=args.label_key,
-                                 n_way=args.n_way,
-                                 n_shot=args.n_shot,
-                                 n_aug=args.n_aug,
-                                 n_query_all=args.n_query_all,
-                                 fc_dim=args.fc_dim,
-                                 l2scale=args.l2scale,
-                                 n_train_class=args.n_train_class,
-                                 with_BN=args.with_BN,
-                                 with_pro=args.with_pro,
-                                 num_parallel_calls=args.num_parallel_calls,
-                                 lambda_meta=args.lambda_meta,
-                                 lambda_recon=args.lambda_recon,
-                                 lambda_consistency=args.lambda_consistency,
-                                 lambda_consistency_pose=args.lambda_consistency_pose,
-                                 lambda_intra=args.lambda_intra,
-                                 lambda_pose_code_reg=args.lambda_pose_code_reg,
-                                 lambda_aux=args.lambda_aux,
-                                 lambda_gan=args.lambda_gan,
-                                 lambda_tf=args.lambda_tf)
+            if args.ave_before_encode:
+                print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef_Before')
+                net = HAL_PN_PoseRef_Before(sess,
+                                     model_name=args.hallucinator_name,
+                                     result_path=args.result_path,
+                                     train_path=train_path,
+                                     val_path=val_path,
+                                     label_key=args.label_key,
+                                     n_way=args.n_way,
+                                     n_shot=args.n_shot,
+                                     n_aug=args.n_aug,
+                                     n_query_all=args.n_query_all,
+                                     fc_dim=args.fc_dim,
+                                     l2scale=args.l2scale,
+                                     n_train_class=args.n_train_class,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     num_parallel_calls=args.num_parallel_calls,
+                                     lambda_meta=args.lambda_meta,
+                                     lambda_recon=args.lambda_recon,
+                                     lambda_consistency=args.lambda_consistency,
+                                     lambda_consistency_pose=args.lambda_consistency_pose,
+                                     lambda_intra=args.lambda_intra,
+                                     lambda_pose_code_reg=args.lambda_pose_code_reg,
+                                     lambda_aux=args.lambda_aux,
+                                     lambda_gan=args.lambda_gan,
+                                     lambda_tf=args.lambda_tf)
+            else:
+                print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef')
+                net = HAL_PN_PoseRef(sess,
+                                     model_name=args.hallucinator_name,
+                                     result_path=args.result_path,
+                                     train_path=train_path,
+                                     val_path=val_path,
+                                     label_key=args.label_key,
+                                     n_way=args.n_way,
+                                     n_shot=args.n_shot,
+                                     n_aug=args.n_aug,
+                                     n_query_all=args.n_query_all,
+                                     fc_dim=args.fc_dim,
+                                     l2scale=args.l2scale,
+                                     n_train_class=args.n_train_class,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     num_parallel_calls=args.num_parallel_calls,
+                                     lambda_meta=args.lambda_meta,
+                                     lambda_recon=args.lambda_recon,
+                                     lambda_consistency=args.lambda_consistency,
+                                     lambda_consistency_pose=args.lambda_consistency_pose,
+                                     lambda_intra=args.lambda_intra,
+                                     lambda_pose_code_reg=args.lambda_pose_code_reg,
+                                     lambda_aux=args.lambda_aux,
+                                     lambda_gan=args.lambda_gan,
+                                     lambda_tf=args.lambda_tf)
         else:
             print('train_hal.py --> main() --> train(): use HAL_PN_baseline')
             print('No HAL_PN_baseline for few-shot multiclass classification experiments!')

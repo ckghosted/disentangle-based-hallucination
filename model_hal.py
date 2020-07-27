@@ -1225,4 +1225,188 @@ class HAL_PN_PoseRef(object):
         print('time: %4.4f' % (time.time() - start_time))
         return [loss_train, acc_train]
 
+class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
+    def __init__(self,
+                 sess,
+                 model_name,
+                 result_path,
+                 train_path,
+                 val_path=None,
+                 label_key='image_labels',
+                 n_way=5, ## number of classes in the support set
+                 n_shot=2, ## number of samples per class in the support set
+                 n_aug=4, ## number of samples per class in the augmented support set
+                 n_query_all=3, ## number of samples in the query set
+                 fc_dim=512,
+                 l2scale=0.001,
+                 n_train_class=64,
+                 with_BN=False,
+                 with_pro=False,
+                 bnDecay=0.9,
+                 epsilon=1e-5,
+                 num_parallel_calls=4,
+                 lambda_meta=1.0,
+                 lambda_recon=1.0,
+                 lambda_consistency=0.0,
+                 lambda_consistency_pose=0.0,
+                 lambda_intra=0.0,
+                 lambda_pose_code_reg=0.0,
+                 lambda_aux=0.0,
+                 lambda_gan=0.0,
+                 lambda_tf=0.0,
+                 gp_scale=10.0,
+                 d_per_g=5):
+        super(HAL_PN_PoseRef_Before, self).__init__(sess,
+                                                    model_name,
+                                                    result_path,
+                                                    train_path,
+                                                    val_path,
+                                                    label_key,
+                                                    n_way,
+                                                    n_shot,
+                                                    n_aug,
+                                                    n_query_all,
+                                                    fc_dim,
+                                                    l2scale,
+                                                    n_train_class,
+                                                    with_BN,
+                                                    with_pro,
+                                                    bnDecay,
+                                                    epsilon,
+                                                    num_parallel_calls,
+                                                    lambda_meta,
+                                                    lambda_recon,
+                                                    lambda_consistency,
+                                                    lambda_consistency_pose,
+                                                    lambda_intra,
+                                                    lambda_pose_code_reg,
+                                                    lambda_aux,
+                                                    lambda_gan,
+                                                    lambda_tf,
+                                                    gp_scale,
+                                                    d_per_g)
+    
+    def build_model(self):
+        ### training parameters
+        self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
+        self.bn_train_hal = tf.placeholder('bool', name='bn_train_hal')
+        
+        ### (1) episodic training
+        ### dataset
+        self.support_features = tf.placeholder(tf.float32, shape=[self.n_way, self.n_shot, self.fc_dim], name='support_features')
+        self.query_features = tf.placeholder(tf.float32, shape=[self.n_query_all, self.fc_dim], name='query_features')
+        self.query_labels = tf.placeholder(tf.int32, shape=[self.n_query_all], name='query_labels')
+        self.pose_ref_features = tf.placeholder(tf.float32, shape=[self.n_way, self.n_aug-self.n_shot, self.fc_dim], name='pose_ref_features')
+        self.pose_ref_intra_features = tf.placeholder(tf.float32, shape=[self.n_way, self.n_intra, self.fc_dim], name='pose_ref_intra_features')
+        self.support_labels = tf.placeholder(tf.int32, shape=[self.n_way], name='support_labels')
+        self.pose_ref_labels = tf.placeholder(tf.int32, shape=[self.n_way], name='pose_ref_labels')
+        self.support_classes = tf.placeholder(tf.int32, shape=[self.n_way], name='support_classes')
+        self.pose_ref_classes = tf.placeholder(tf.int32, shape=[self.n_way], name='pose_ref_classes')
+        
+        ### basic operation
+        self.support_feat_flat = tf.reshape(self.support_features, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_shot, self.fc_dim]
+        self.support_feat_ave = tf.reduce_mean(self.support_features, axis=1, keep_dims=True) ### shape: [self.n_way, 1, self.fc_dim]
+        self.pose_ref_feat_flat = tf.reshape(self.pose_ref_features, shape=[-1, self.fc_dim]) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.pose_ref_feat_ave = tf.reduce_mean(self.pose_ref_features, axis=1, keep_dims=True) ### shape: [self.n_way, 1, self.fc_dim]
+        self.pose_ref_intra_feat_flat = tf.reshape(self.pose_ref_intra_features, shape=[-1, self.fc_dim]) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.query_labels_vec = tf.one_hot(self.query_labels, self.n_way)
+        ### hallucination flow
+        if self.with_pro:
+            self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
+            self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
+            self.pose_ref_class_code = self.proto_encoder(self.pose_ref_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        else:
+            self.support_class_code = self.support_feat_flat
+            self.query_class_code = self.query_features
+            self.pose_ref_class_code = self.pose_ref_feat_flat
+        self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
+        self.support_feat_ave_tile = tf.tile(self.support_feat_ave, multiples=[1, self.n_aug-self.n_shot, 1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        self.support_feat_ave_tile_flat = tf.reshape(self.support_feat_ave_tile, shape=[-1, self.fc_dim]) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.transformed_pose_ref, self.pose_code = self.transformer(self.pose_ref_feat_flat, self.support_feat_ave_tile_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) ### shape=[self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.hallucinated_features = tf.reshape(self.transformed_pose_ref, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        ### prototypical network data flow using the augmented support set
+        if self.with_pro:
+            self.hal_class_code = self.proto_encoder(self.transformed_pose_ref, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        else:
+            self.hal_class_code = self.transformed_pose_ref
+        self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        self.support_aug_encode = tf.concat((self.support_encode, self.hal_encode), axis=1) ### shape: [self.n_way, self.n_aug, self.fc_dim]
+        self.support_aug_prototypes = tf.reduce_mean(self.support_aug_encode, axis=1) ### shape: [self.n_way, self.fc_dim]
+        self.query_tile = tf.reshape(tf.tile(self.query_class_code, multiples=[1, self.n_way]), [self.n_query_all, self.n_way, -1]) #### shape: [self.n_query_all, self.n_way, self.fc_dim]
+        self.logits_pro_aug = -tf.norm(self.support_aug_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
+        self.loss_pro_aug = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.query_labels_vec,
+                                                                                   logits=self.logits_pro_aug,
+                                                                                   name='loss_pro_aug'))
+        self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
 
+        ### cycle-consistency loss
+        self.pose_ref_feat_ave_tile = tf.tile(self.pose_ref_feat_ave, multiples=[1, self.n_aug-self.n_shot, 1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        self.pose_ref_feat_ave_tile_flat = tf.reshape(self.pose_ref_feat_ave_tile, shape=[-1, self.fc_dim]) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.pose_ref_recon, self.transformed_pose_code = self.transformer(self.transformed_pose_ref, self.pose_ref_feat_ave_tile_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) ### shape=[self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.loss_pose_ref_recon = tf.reduce_mean((self.pose_ref_feat_flat - self.pose_ref_recon)**2)
+        self.loss_pose_code_recon = tf.reduce_mean((self.pose_code - self.transformed_pose_code)**2)
+        ### reconstruction loss
+        self.support_feat_ave_tile2 = tf.tile(self.support_feat_ave, multiples=[1, self.n_shot, 1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
+        self.support_feat_ave_tile2_flat = tf.reshape(self.support_feat_ave_tile2, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_shot, self.fc_dim]
+        self.support_recon, _ = self.transformer(self.support_feat_flat, self.support_feat_ave_tile2_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True)
+        self.loss_support_recon = tf.reduce_mean((self.support_feat_flat - self.support_recon)**2)
+        ### intra-class transformation consistency loss
+        ### (if pose-ref are of the same class as the support samples, then the transformed pose-ref should be as close to the pose-ref itself as possible)
+        self.support_feat_ave_tile3 = tf.tile(self.support_feat_ave, multiples=[1, self.n_intra, 1]) ### shape: [self.n_way, self.n_intra, self.fc_dim]
+        self.support_feat_ave_tile3_flat = tf.reshape(self.support_feat_ave_tile3, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_intra, self.fc_dim]
+        self.transformed_pose_ref_intra, _ = self.transformer(self.pose_ref_intra_feat_flat, self.support_feat_ave_tile3_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) ### shape=[self.n_way*self.n_intra, self.fc_dim]
+        self.loss_intra = tf.reduce_mean((self.pose_ref_intra_feat_flat - self.transformed_pose_ref_intra)**2)
+        
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
+        self.loss_all = self.lambda_meta * self.loss_pro_aug + \
+                        self.lambda_recon * self.loss_support_recon + \
+                        self.lambda_consistency * self.loss_pose_ref_recon + \
+                        self.lambda_consistency_pose * self.loss_pose_code_recon + \
+                        self.lambda_intra * self.loss_intra
+        
+        ### variables
+        self.all_vars = tf.global_variables()
+        self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
+        ### trainable variables
+        self.trainable_vars = tf.trainable_variables()
+        ### regularizers
+        self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        self.used_regs = [reg for reg in self.all_regs if \
+                          ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        
+        ### optimizer
+        with tf.control_dependencies(self.update_ops):
+            self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                              beta1=0.5).minimize(self.loss_all+sum(self.used_regs),
+                                                                  var_list=self.trainable_vars)
+        
+        ### model saver (keep the best checkpoint)
+        self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)
+
+        ### Count number of trainable variables
+        total_params = 0
+        for var in self.trainable_vars:
+            shape = var.get_shape()
+            var_params = 1
+            for dim in shape:
+                var_params *= dim.value
+            total_params += var_params
+        print('total number of parameters: %d' % total_params)
+        
+        return [self.all_vars, self.trainable_vars, self.all_regs]
+
+    ## Add a transformer to encode the pose_ref into seed class
+    def transformer(self, input_pose, input_class, bn_train, with_BN=True, epsilon=1e-5, reuse=False):
+        code_class = self.proto_encoder(input_class, bn_train=bn_train, with_BN=with_BN, reuse=True)
+        code_pose = self.encoder_pose(input_pose, bn_train=bn_train, with_BN=with_BN, reuse=reuse)
+        x = tf.concat([code_class, code_pose], axis=1)
+        with tf.variable_scope('hal_tran', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
+                x = batch_norm(x, is_train=bn_train)
+            x = tf.nn.relu(x, name='relu1')
+            x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
+            x = tf.nn.relu(x, name='relu2')
+            return x, code_pose

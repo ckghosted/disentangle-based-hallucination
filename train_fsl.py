@@ -7,7 +7,7 @@ import numpy as np
 from model_fsl import FSL
 from model_fsl import FSL_PN_GAN, FSL_PN_GAN2
 from model_fsl import FSL_PN_AFHN
-from model_fsl import FSL_PN_PoseRef
+from model_fsl import FSL_PN_PoseRef, FSL_PN_PoseRef_Before
 import os, re, glob
 
 import argparse
@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--use_canonical_gallery', action='store_true', help='Use gallery_indexes_canonical_XX.npy if present')
     parser.add_argument('--n_clusters_per_class', default=0, type=int, help='Number of clusters per base class for making the gallery set')
     parser.add_argument('--test_mode', action='store_true', help='After training, return novel class code and pose code if present')
+    parser.add_argument('--ave_before_encode', action='store_true', help='Use class HAL_PN_PoseRef_Before (take feature average before class encoder) if present')
     
     args = parser.parse_args()
     train(args)
@@ -149,19 +150,34 @@ def train(args):
                               with_BN=args.with_BN,
                               with_pro=args.with_pro)
         elif args.PoseRef:
-            net = FSL_PN_PoseRef(sess,
-                                 model_name=args.model_name,
-                                 result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                 fc_dim=args.fc_dim,
-                                 n_class=args.n_class,
-                                 n_base_class=args.n_base_class,
-                                 l2scale=args.l2scale,
-                                 n_gallery_per_class=args.n_gallery_per_class,
-                                 n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                 with_BN=args.with_BN,
-                                 with_pro=args.with_pro,
-                                 use_canonical_gallery=args.use_canonical_gallery,
-                                 n_clusters_per_class=args.n_clusters_per_class)
+            if args.ave_before_encode:
+                net = FSL_PN_PoseRef(sess,
+                                     model_name=args.model_name,
+                                     result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                     fc_dim=args.fc_dim,
+                                     n_class=args.n_class,
+                                     n_base_class=args.n_base_class,
+                                     l2scale=args.l2scale,
+                                     n_gallery_per_class=args.n_gallery_per_class,
+                                     n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     use_canonical_gallery=args.use_canonical_gallery,
+                                     n_clusters_per_class=args.n_clusters_per_class)
+            else:
+                net = FSL_PN_PoseRef_Before(sess,
+                                            model_name=args.model_name,
+                                            result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                            fc_dim=args.fc_dim,
+                                            n_class=args.n_class,
+                                            n_base_class=args.n_base_class,
+                                            l2scale=args.l2scale,
+                                            n_gallery_per_class=args.n_gallery_per_class,
+                                            n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                            with_BN=args.with_BN,
+                                            with_pro=args.with_pro,
+                                            use_canonical_gallery=args.use_canonical_gallery,
+                                            n_clusters_per_class=args.n_clusters_per_class)
         else:
             net = FSL(sess,
                       model_name=args.model_name,
@@ -285,19 +301,34 @@ def inference(args):
                               with_BN=args.with_BN,
                               with_pro=args.with_pro)
         elif args.PoseRef:
-            net = FSL_PN_PoseRef(sess,
-                                 model_name=args.model_name,
-                                 result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                 fc_dim=args.fc_dim,
-                                 n_class=args.n_class,
-                                 n_base_class=args.n_base_class,
-                                 l2scale=args.l2scale,
-                                 n_gallery_per_class=args.n_gallery_per_class,
-                                 n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                 with_BN=args.with_BN,
-                                 with_pro=args.with_pro,
-                                 use_canonical_gallery=args.use_canonical_gallery,
-                                 n_clusters_per_class=args.n_clusters_per_class)
+            if args.ave_before_encode:
+                net = FSL_PN_PoseRef(sess,
+                                     model_name=args.model_name,
+                                     result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                     fc_dim=args.fc_dim,
+                                     n_class=args.n_class,
+                                     n_base_class=args.n_base_class,
+                                     l2scale=args.l2scale,
+                                     n_gallery_per_class=args.n_gallery_per_class,
+                                     n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     use_canonical_gallery=args.use_canonical_gallery,
+                                     n_clusters_per_class=args.n_clusters_per_class)
+            else:
+                net = FSL_PN_PoseRef_Before(sess,
+                                            model_name=args.model_name,
+                                            result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                            fc_dim=args.fc_dim,
+                                            n_class=args.n_class,
+                                            n_base_class=args.n_base_class,
+                                            l2scale=args.l2scale,
+                                            n_gallery_per_class=args.n_gallery_per_class,
+                                            n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                            with_BN=args.with_BN,
+                                            with_pro=args.with_pro,
+                                            use_canonical_gallery=args.use_canonical_gallery,
+                                            n_clusters_per_class=args.n_clusters_per_class)
         else:
             net = FSL(sess,
                       model_name=args.model_name,
