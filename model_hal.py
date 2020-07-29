@@ -185,6 +185,7 @@ class HAL_PN_GAN(object):
         self.label_key = label_key
         self.train_base_dict = unpickle(self.train_path)
         self.train_feat_list = self.train_base_dict['features']
+        self.train_fname_list = self.train_base_dict['image_names']
         #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
         #### such that all labels become in the range {0, 1, ..., self.n_train_class-1}
         self.train_class_list_raw = self.train_base_dict[self.label_key]
@@ -329,6 +330,7 @@ class HAL_PN_GAN(object):
         return hal_feat
     
     def train(self,
+              image_path,
               num_epoch=100,
               n_ite_per_epoch=600,
               lr_start=1e-5,
@@ -377,7 +379,7 @@ class HAL_PN_GAN(object):
                 query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                 support_labels = selected_lbs
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                _, loss, acc = self.sess.run([self.opt, self.loss_pro_aug, self.acc_pro_aug],
+                _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
                                              feed_dict={self.support_features: support_features,
                                                         self.query_features: query_features,
                                                         self.query_labels: query_labels,
@@ -387,6 +389,35 @@ class HAL_PN_GAN(object):
                                                         self.learning_rate: lr})
                 loss_ite_train.append(loss)
                 acc_ite_train.append(np.mean(acc))
+                
+                ##### visualize nearest images
+                if epoch % n_ep_per_visualization == 0 and ite == n_ite_per_epoch:
+                    m_support_considered = 5
+                    ###### for each class, just print the first xi and x_tilde_i
+                    fnames_x_i = [self.train_fname_list[selected_indexes[lb_idx][0]] for lb_idx in range(m_support_considered)]
+                    fnames_x_tilde_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_tilde_i[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    # for idx_way in range(m_support_considered):
+                    #     print('============================================================')
+                    #     print(fnames_x_i[idx_way])
+                    #     print(fnames_x_tilde_i[idx_way])
+                    x_dim = 84
+                    img_array = np.empty((2*m_support_considered, x_dim, x_dim, 3), dtype='uint8')
+                    for idx_way in range(m_support_considered):
+                        # fnames_x_i
+                        file_path = os.path.join(image_path, fnames_x_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way,:] = img
+                        # fnames_x_tilde_i
+                        file_path = os.path.join(image_path, fnames_x_tilde_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+m_support_considered,:] = img
+                    fig = plot(img_array, 2, m_support_considered, x_dim=x_dim)
+                    plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
+
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
             print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
@@ -726,6 +757,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         return hal_feat, input_z_vec
     
     def train(self,
+              image_path,
               num_epoch=100,
               n_ite_per_epoch=600,
               lr_start=1e-5,
@@ -793,7 +825,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                 query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                 support_labels = selected_lbs
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                _, loss, acc = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug],
+                _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.hal_feat],
                                              feed_dict={self.support_features: support_features,
                                                         self.query_features: query_features,
                                                         self.query_labels: query_labels,
@@ -803,6 +835,35 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                                         self.learning_rate: lr})
                 loss_ite_train.append(loss)
                 acc_ite_train.append(np.mean(acc))
+
+                ##### visualize nearest images
+                if epoch % n_ep_per_visualization == 0 and ite == n_ite_per_epoch:
+                    m_support_considered = 5
+                    ###### for each class, just print the first xi and x_tilde_i
+                    fnames_x_i = [self.train_fname_list[selected_indexes[lb_idx][0]] for lb_idx in range(m_support_considered)]
+                    fnames_x_tilde_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_tilde_i[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    # for idx_way in range(m_support_considered):
+                    #     print('============================================================')
+                    #     print(fnames_x_i[idx_way])
+                    #     print(fnames_x_tilde_i[idx_way])
+                    x_dim = 84
+                    img_array = np.empty((2*m_support_considered, x_dim, x_dim, 3), dtype='uint8')
+                    for idx_way in range(m_support_considered):
+                        # fnames_x_i
+                        file_path = os.path.join(image_path, fnames_x_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way,:] = img
+                        # fnames_x_tilde_i
+                        file_path = os.path.join(image_path, fnames_x_tilde_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+m_support_considered,:] = img
+                    fig = plot(img_array, 2, m_support_considered, x_dim=x_dim)
+                    plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
+
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
             print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
@@ -882,6 +943,7 @@ class HAL_PN_PoseRef(object):
         self.label_key = label_key
         self.train_base_dict = unpickle(self.train_path)
         self.train_feat_list = self.train_base_dict['features']
+        self.train_fname_list = self.train_base_dict['image_names']
         #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
         #### such that all labels become in the range {0, 1, ..., self.n_train_class-1}
         self.train_class_list_raw = self.train_base_dict[self.label_key]
@@ -905,6 +967,7 @@ class HAL_PN_PoseRef(object):
         #     self.val_path = val_path
         #     self.val_base_dict = unpickle(self.val_path)
         #     self.val_feat_list = self.val_base_dict['features']
+        #     self.val_fname_list = self.val_base_dict['image_names']
         #     #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
         #     #### such that all labels become in the range {0, 1, ..., self.n_train_class-1}
         #     self.val_class_list_raw = self.val_base_dict[self.label_key]
@@ -1092,6 +1155,7 @@ class HAL_PN_PoseRef(object):
             return x, code_pose
     
     def train(self,
+              image_path,
               num_epoch=100,
               n_ite_per_epoch=600,
               lr_start=1e-5,
@@ -1159,7 +1223,7 @@ class HAL_PN_PoseRef(object):
                 pose_ref_labels = selected_lbs_pose
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
                 pose_ref_classes = np.array([self.train_class_list_raw[selected_indexes_pose[i][0]] for i in range(self.n_way)])
-                _, loss, acc = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug],
+                _, loss, acc, x_tilde_i, x_hat_j, x_hat_i, x_bar_i = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.transformed_pose_ref, self.pose_ref_recon, self.support_recon, self.transformed_pose_ref_intra],
                                              feed_dict={self.support_features: support_features,
                                                         self.query_features: query_features,
                                                         self.query_labels: query_labels,
@@ -1173,6 +1237,77 @@ class HAL_PN_PoseRef(object):
                                                         self.learning_rate: lr})
                 loss_ite_train.append(loss)
                 acc_ite_train.append(np.mean(acc))
+                
+                ##### visualize nearest images
+                if epoch % n_ep_per_visualization == 0 and ite == n_ite_per_epoch:
+                    m_support_considered = 5
+                    ###### for each class, just print the first xi/xj/x_tilde_i/...
+                    fnames_x_i = [self.train_fname_list[selected_indexes[lb_idx][self.n_intra]] for lb_idx in range(m_support_considered)]
+                    fnames_x_hat_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_hat_i[lb_idx*self.n_shot]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_i2 = [self.train_fname_list[selected_indexes[lb_idx][0]] for lb_idx in range(m_support_considered)]
+                    fnames_x_bar_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_bar_i[lb_idx*self.n_intra]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_j = [self.train_fname_list[selected_indexes_pose[lb_idx][0]] for lb_idx in range(m_support_considered)]
+                    fnames_x_hat_j = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_hat_j[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_tilde_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_tilde_i[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    # for idx_way in range(m_support_considered):
+                    #     print('============================================================')
+                    #     print(fnames_x_i[idx_way])
+                    #     print(fnames_x_hat_i[idx_way])
+                    #     print('------------------------------------------------------------')
+                    #     print(fnames_x_i2[idx_way])
+                    #     print(fnames_x_bar_i[idx_way])
+                    #     print('------------------------------------------------------------')
+                    #     print(fnames_x_j[idx_way])
+                    #     print(fnames_x_hat_j[idx_way])
+                    #     print('------------------------------------------------------------')
+                    #     print(fnames_x_tilde_i[idx_way])
+                    x_dim = 84
+                    img_array = np.empty((7*m_support_considered, x_dim, x_dim, 3), dtype='uint8')
+                    for idx_way in range(m_support_considered):
+                        # fnames_x_i
+                        file_path = os.path.join(image_path, fnames_x_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way,:] = img
+                        # fnames_x_hat_i
+                        file_path = os.path.join(image_path, fnames_x_hat_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+m_support_considered,:] = img
+                        # fnames_x_i2
+                        file_path = os.path.join(image_path, fnames_x_i2[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+2*m_support_considered,:] = img
+                        # fnames_x_bar_i
+                        file_path = os.path.join(image_path, fnames_x_bar_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+3*m_support_considered,:] = img
+                        # fnames_x_j
+                        file_path = os.path.join(image_path, fnames_x_j[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+4*m_support_considered,:] = img
+                        # fnames_x_hat_j
+                        file_path = os.path.join(image_path, fnames_x_hat_j[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+5*m_support_considered,:] = img
+                        # fnames_x_tilde_i
+                        file_path = os.path.join(image_path, fnames_x_tilde_i[idx_way])
+                        img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                        img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img_array[idx_way+6*m_support_considered,:] = img
+                    fig = plot(img_array, 7, m_support_considered, x_dim=x_dim)
+                    plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
             
             ## validation on val classes
             # for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
