@@ -431,6 +431,13 @@ class FSL_PN_GAN(FSL):
         self.features_and_noise = tf.placeholder(tf.float32, shape=[None]+[self.fc_dim+self.z_dim], name='features_and_noise')  #### shape: [-1, self.z_dim+self.fc_dim] (e.g., 100+512=612)
         self.hallucinated_features = self.hallucinator(self.features_and_noise, bn_train=self.bn_train, with_BN=self.with_BN)
         
+        ### Data flow to extract class codes and pose codes for visualization
+        self.novel_feat = tf.placeholder(tf.float32, shape=[None, self.fc_dim], name='novel_feat')
+        if self.with_pro:
+            self.novel_code_class = self.proto_encoder(self.novel_feat, bn_train=self.bn_train, with_BN=self.with_BN, reuse=True)
+        else:
+            self.novel_code_class = self.novel_feat
+
         ### variables and regularizers
         self.all_vars = tf.global_variables()
         self.all_vars_fsl_cls = [var for var in self.all_vars if 'fsl_cls' in var.name]
@@ -640,7 +647,37 @@ class FSL_PN_GAN(FSL):
         self.saver.save(self.sess,
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=ite)
-        return [loss_train, acc_train, features_novel_final_dict]
+
+        if test_mode:        
+            ### Get the class codes of all seed and hal features
+            features_novel_embeded_dict = {}
+            features_novel_final_array = np.empty([len(all_novel_labels), n_aug, self.fc_dim])
+            lb_counter = 0
+            for lb in all_novel_labels:
+                features_novel_final_array[lb_counter,:,:] = features_novel_final_dict[lb]
+                lb_counter += 1
+            features_novel_embeded_array = self.sess.run(self.novel_code_class,
+                                                         feed_dict={self.novel_feat: np.reshape(features_novel_final_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_aug, self.fc_dim]
+                                                                    self.bn_train: False})
+            features_novel_embeded_array_reshape = np.reshape(features_novel_embeded_array, [len(all_novel_labels), n_aug, self.fc_dim])
+            lb_counter = 0
+            for lb in all_novel_labels:
+                features_novel_embeded_dict[lb] = features_novel_embeded_array_reshape[lb_counter,:,:]
+                lb_counter += 1
+        
+            ### encode novel features using the two encoders for visualization
+            novel_code_class_all = []
+            nBatches_novel = int(np.ceil(features_novel_train.shape[0] / bsize))
+            for idx in tqdm.tqdm(range(nBatches_novel)):
+                batch_features = features_novel_train[idx*bsize:(idx+1)*bsize]
+                novel_code_class = self.sess.run(self.novel_code_class,
+                                                 feed_dict={self.novel_feat: batch_features,
+                                                            self.bn_train: False})
+                novel_code_class_all.append(novel_code_class)
+            novel_code_class_all = np.concatenate(novel_code_class_all, axis=0)
+            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, novel_code_class_all]
+        else:
+            return [loss_train, acc_train, features_novel_final_dict]
     
     ## for loading the trained hallucinator and prototypical network
     def load_hal_pro(self, init_from, init_from_ckpt=None):
@@ -1197,7 +1234,7 @@ class FSL_PN_PoseRef(FSL):
                 novel_code_pose_all.append(novel_code_pose)
             novel_code_class_all = np.concatenate(novel_code_class_all, axis=0)
             novel_code_pose_all = np.concatenate(novel_code_pose_all, axis=0)
-            return [loss_train, acc_train, features_novel_final_dict, pose_feat_dict, features_novel_embeded_dict, novel_code_class_all, novel_code_pose_all]
+            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, novel_code_class_all, novel_code_pose_all, pose_feat_dict]
         else:
             return [loss_train, acc_train, features_novel_final_dict, pose_feat_dict]
     
@@ -1644,7 +1681,7 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
                 novel_code_pose_all.append(novel_code_pose)
             novel_code_class_all = np.concatenate(novel_code_class_all, axis=0)
             novel_code_pose_all = np.concatenate(novel_code_pose_all, axis=0)
-            return [loss_train, acc_train, features_novel_final_dict, pose_feat_dict, features_novel_embeded_dict, novel_code_class_all, novel_code_pose_all]
+            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, novel_code_class_all, novel_code_pose_all, pose_feat_dict]
         else:
             return [loss_train, acc_train, features_novel_final_dict, pose_feat_dict]
     

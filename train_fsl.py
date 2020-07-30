@@ -39,7 +39,7 @@ def main():
     parser.add_argument('--extractor_folder', type=str, help='Folder name of the saved feature extracted by the pre-trained backbone')
     parser.add_argument('--hallucinator_name', default='Baseline', type=str, help='Folder name of the saved hallucinator model (default Baseline: no hallucination)')
     parser.add_argument('--hal_epoch', default=0, type=int, help='Hallucinator version (number of epoch), default 0: use the latest version (None)')
-    parser.add_argument('--image_path', default='/data/put_data/cclin/datasets/ILSVRC2012/', type=str, help='Path of the raw images (for visualization)')
+    parser.add_argument('--image_path', default='./image_folder', type=str, help='Path to the images for visualization')
     parser.add_argument('--n_class', default=100, type=int, help='Number of all classes (base + validation or base + novel)')
     parser.add_argument('--n_base_class', default=100, type=int, help='Number of base classes')
     parser.add_argument('--n_shot', default=1, type=int, help='Number of shot')
@@ -489,10 +489,14 @@ def visualize(args):
     features_base_train = train_base_dict['features']
     labels_base_train = train_base_dict[args.label_key]
     fnames_base_train = train_base_dict['image_names']
-    ## (2) Load seed and hallucinated features
+    ## (2) Load training results
     training_results = np.load(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'results.npy'), allow_pickle=True)
     features_novel_final_dict = training_results[2]
-    pose_feat_dict = training_results[3]
+    features_novel_embeded_dict = training_results[3]
+    novel_code_class_all = training_results[4]
+    if len(training_results) > 5:
+        novel_code_pose_all = training_results[5]
+        pose_feat_dict = training_results[6]
     ## (3) Combine seed/hal features and real features
     # allow dimension reduction using only a subset of classes
     # lb_for_dim_reduction = all_novel_labels
@@ -521,95 +525,7 @@ def visualize(args):
                      n_aug=args.n_aug,
                      title='real and hallucinated features',
                      save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'hal_vis.png'))
-    ## (5) Find the closest real feature (and the corresponding image) for each hallucinated feature
-    for lb_idx in range(5):
-        considered_lb = lb_for_dim_reduction[lb_idx]
-        considered_feat_seed = features_novel_final_dict[considered_lb][:args.n_shot,:]
-        considered_feat_hal = features_novel_final_dict[considered_lb][args.n_shot:,:]
-        considered_feat_pose = pose_feat_dict[considered_lb]
-
-        nearest_idx_seed, nearest_diff_seed = find_nearest_idx(features_novel_train, considered_feat_seed[0])
-        nearest_indexes_hal = []
-        nearest_differences_hal = []
-        nearest_indexes_pose = []
-        nearest_differences_pose = []
-        n_hal_plot = min(8, args.n_aug-args.n_shot)
-        for idx in range(n_hal_plot):
-            nearest_idx, nearest_diff = find_nearest_idx(features_novel_train, considered_feat_hal[idx])
-            nearest_indexes_hal.append(nearest_idx)
-            nearest_differences_hal.append(nearest_diff)
-            nearest_idx, nearest_diff = find_nearest_idx(features_base_train, considered_feat_pose[idx])
-            nearest_indexes_pose.append(nearest_idx)
-            nearest_differences_pose.append(nearest_diff)
-
-        x_dim = 84
-        img_array = np.empty((3*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
-        subtitles = []
-        for i in range(len(nearest_indexes_hal)):
-            ## (1) put seed image in the 1st row
-            file_path = os.path.join(args.image_path, fnames_novel_train[nearest_idx_seed])
-            img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-            img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_array[i,:] = img
-            ## (2) put pose-ref image in the 2nd row
-            idx = nearest_indexes_pose[i]
-            file_path = os.path.join(args.image_path, fnames_base_train[idx])
-            img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-            img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_array[i+len(nearest_indexes_hal),:] = img
-            ## (3) put hal image in the 3rd row
-            idx = nearest_indexes_hal[i]
-            file_path = os.path.join(args.image_path, fnames_novel_train[idx])
-            img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-            img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_array[i+2*len(nearest_indexes_hal),:] = img
-            subtitles.append(str(labels_novel_train[idx]))
-        # print(subtitles)
-        fig = plot(img_array, 3, n_hal_plot, x_dim=x_dim)
-        plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
-    ## (6) Visualize class codes and pose codes
-    novel_code_class_all = training_results[5]
-    novel_code_pose_all = training_results[6]
-    X_code_class = None
-    X_code_pose = None
-    Y_code = None
-    for lb in lb_for_dim_reduction:
-        idx_for_this_lb = [i for i in range(len(labels_novel_train)) if labels_novel_train[i] == lb]
-        class_code_for_this_lb = novel_code_class_all[idx_for_this_lb,:]
-        pose_code_for_this_lb = novel_code_pose_all[idx_for_this_lb,:]
-        labels_for_this_lb = np.repeat(lb, repeats=len(idx_for_this_lb))
-        if X_code_class is None:
-            X_code_class = class_code_for_this_lb
-            X_code_pose = pose_code_for_this_lb
-            Y_code = labels_for_this_lb
-        else:
-            X_code_class = np.concatenate((X_code_class, class_code_for_this_lb), axis=0)
-            X_code_pose = np.concatenate((X_code_pose, pose_code_for_this_lb), axis=0)
-            Y_code = np.concatenate((Y_code, labels_for_this_lb), axis=0)
-    X_code_class_emb_TSNE30_1000 = dim_reduction(X_code_class, 'TSNE', 2, 30, 1000)
-    considered_lb = lb_for_dim_reduction
-    plot_emb_results(_emb=X_code_class_emb_TSNE30_1000,
-                     _labels=Y_code,
-                     considered_lb=considered_lb,
-                     all_labels=all_novel_labels,
-                     n_shot=0,
-                     n_aug=0,
-                     title='class codes',
-                     save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'class_code.png'))
-    X_code_pose_emb_TSNE30_1000 = dim_reduction(X_code_pose, 'TSNE', 2, 30, 1000)
-    plot_emb_results(_emb=X_code_pose_emb_TSNE30_1000,
-                     _labels=Y_code,
-                     considered_lb=considered_lb,
-                     all_labels=all_novel_labels,
-                     n_shot=0,
-                     n_aug=0,
-                     title='appearance codes',
-                     save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'pose_code.png'))
-    ## (7) How about the prototypical-network-embeded features?
-    features_novel_embeded_dict = training_results[4]
+    ## (5) How about the prototypical-network-embeded features?
     X_all = None
     Y_all = None
     for lb in lb_for_dim_reduction:
@@ -632,6 +548,135 @@ def visualize(args):
                      n_aug=args.n_aug,
                      title='class codes of real and hallucinated features',
                      save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'hal_vis_embedded.png'))
+    ## (6) Find the closest real feature (and the corresponding image) for each hallucinated feature
+    if len(training_results) > 5:
+        for lb_idx in range(5):
+            considered_lb = lb_for_dim_reduction[lb_idx]
+            considered_feat_seed = features_novel_final_dict[considered_lb][:args.n_shot,:]
+            considered_feat_hal = features_novel_final_dict[considered_lb][args.n_shot:,:]
+            considered_feat_pose = pose_feat_dict[considered_lb]
 
+            nearest_idx_seed, nearest_diff_seed = find_nearest_idx(features_novel_train, considered_feat_seed[0])
+            nearest_indexes_hal = []
+            nearest_differences_hal = []
+            nearest_indexes_pose = []
+            nearest_differences_pose = []
+            n_hal_plot = min(8, args.n_aug-args.n_shot)
+            for idx in range(n_hal_plot):
+                nearest_idx, nearest_diff = find_nearest_idx(features_novel_train, considered_feat_hal[idx])
+                nearest_indexes_hal.append(nearest_idx)
+                nearest_differences_hal.append(nearest_diff)
+                nearest_idx, nearest_diff = find_nearest_idx(features_base_train, considered_feat_pose[idx])
+                nearest_indexes_pose.append(nearest_idx)
+                nearest_differences_pose.append(nearest_diff)
+
+            x_dim = 84
+            img_array = np.empty((3*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
+            subtitles = []
+            for i in range(len(nearest_indexes_hal)):
+                ## (1) put seed image in the 1st row
+                file_path = os.path.join(args.image_path, fnames_novel_train[nearest_idx_seed])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i,:] = img
+                ## (2) put pose-ref image in the 2nd row
+                idx = nearest_indexes_pose[i]
+                file_path = os.path.join(args.image_path, fnames_base_train[idx])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i+len(nearest_indexes_hal),:] = img
+                ## (3) put hal image in the 3rd row
+                idx = nearest_indexes_hal[i]
+                file_path = os.path.join(args.image_path, fnames_novel_train[idx])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i+2*len(nearest_indexes_hal),:] = img
+                subtitles.append(str(labels_novel_train[idx]))
+            # print(subtitles)
+            fig = plot(img_array, 3, n_hal_plot, x_dim=x_dim)
+            plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
+    else:
+        for lb_idx in range(5):
+            considered_lb = lb_for_dim_reduction[lb_idx]
+            considered_feat_seed = features_novel_final_dict[considered_lb][:args.n_shot,:]
+            considered_feat_hal = features_novel_final_dict[considered_lb][args.n_shot:,:]
+
+            nearest_idx_seed, nearest_diff_seed = find_nearest_idx(features_novel_train, considered_feat_seed[0])
+            nearest_indexes_hal = []
+            nearest_differences_hal = []
+            nearest_indexes_pose = []
+            nearest_differences_pose = []
+            n_hal_plot = min(8, args.n_aug-args.n_shot)
+            for idx in range(n_hal_plot):
+                nearest_idx, nearest_diff = find_nearest_idx(features_novel_train, considered_feat_hal[idx])
+                nearest_indexes_hal.append(nearest_idx)
+                nearest_differences_hal.append(nearest_diff)
+
+            x_dim = 84
+            img_array = np.empty((2*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
+            subtitles = []
+            for i in range(len(nearest_indexes_hal)):
+                ## (1) put seed image in the 1st row
+                file_path = os.path.join(args.image_path, fnames_novel_train[nearest_idx_seed])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i,:] = img
+                ## (2) put hal image in the 2nd row
+                idx = nearest_indexes_hal[i]
+                file_path = os.path.join(args.image_path, fnames_novel_train[idx])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i+len(nearest_indexes_hal),:] = img
+                subtitles.append(str(labels_novel_train[idx]))
+            # print(subtitles)
+            fig = plot(img_array, 2, n_hal_plot, x_dim=x_dim)
+            plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
+    ## (7) Visualize class codes and pose codes
+    X_code_class = None
+    Y_code = None
+    for lb in lb_for_dim_reduction:
+        idx_for_this_lb = [i for i in range(len(labels_novel_train)) if labels_novel_train[i] == lb]
+        class_code_for_this_lb = novel_code_class_all[idx_for_this_lb,:]
+        labels_for_this_lb = np.repeat(lb, repeats=len(idx_for_this_lb))
+        if X_code_class is None:
+            X_code_class = class_code_for_this_lb
+            Y_code = labels_for_this_lb
+        else:
+            X_code_class = np.concatenate((X_code_class, class_code_for_this_lb), axis=0)
+            Y_code = np.concatenate((Y_code, labels_for_this_lb), axis=0)
+    X_code_class_emb_TSNE30_1000 = dim_reduction(X_code_class, 'TSNE', 2, 30, 1000)
+    considered_lb = lb_for_dim_reduction
+    plot_emb_results(_emb=X_code_class_emb_TSNE30_1000,
+                     _labels=Y_code,
+                     considered_lb=considered_lb,
+                     all_labels=all_novel_labels,
+                     n_shot=0,
+                     n_aug=0,
+                     title='class codes',
+                     save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'class_code.png'))
+    if len(training_results) > 5:
+        X_code_pose = None
+        for lb in lb_for_dim_reduction:
+            idx_for_this_lb = [i for i in range(len(labels_novel_train)) if labels_novel_train[i] == lb]
+            pose_code_for_this_lb = novel_code_pose_all[idx_for_this_lb,:]
+            if X_code_class is None:
+                X_code_pose = pose_code_for_this_lb
+            else:
+                X_code_pose = np.concatenate((X_code_pose, pose_code_for_this_lb), axis=0)
+        X_code_pose_emb_TSNE30_1000 = dim_reduction(X_code_pose, 'TSNE', 2, 30, 1000)
+        plot_emb_results(_emb=X_code_pose_emb_TSNE30_1000,
+                         _labels=Y_code,
+                         considered_lb=considered_lb,
+                         all_labels=all_novel_labels,
+                         n_shot=0,
+                         n_aug=0,
+                         title='appearance codes',
+                         save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'pose_code.png'))
+    
 if __name__ == '__main__':
     main()
