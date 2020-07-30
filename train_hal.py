@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--result_path', type=str, help='Path to save all results')
     parser.add_argument('--extractor_folder', type=str, help='Folder name of the saved feature extracted by the pre-trained backbone')
     parser.add_argument('--hallucinator_name', type=str, help='Folder name to save hallucinator models and learning curves')
+    parser.add_argument('--image_path', default='./image_folder', type=str, help='Path to the images for visualization')
     parser.add_argument('--l2scale', default=1e-3, type=float, help='L2-regularizer scale')
     parser.add_argument('--n_way', default=40, type=int, help='Number of classes in the support set')
     parser.add_argument('--n_shot', default=5, type=int, help='Number of samples per class in the support set')
@@ -216,11 +217,16 @@ def train(args):
             print('------------------[all_regs]------------------')
             for var in all_regs:
                 print(var.name)
+        if os.path.exists(args.image_path):
+            image_path = args.image_path
+        else:
+            image_path = './image_folder'
         if args.lr_decay_step == 0:
             lr_decay_step = args.num_epoch//3
         else:
             lr_decay_step = args.lr_decay_step
-        res = net.train(num_epoch=args.num_epoch,
+        res = net.train(image_path=image_path,
+                        num_epoch=args.num_epoch,
                         n_ite_per_epoch=args.n_ite_per_epoch,
                         lr_start=args.lr_start,
                         lr_decay=args.lr_decay,
