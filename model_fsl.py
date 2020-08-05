@@ -174,6 +174,7 @@ class FSL(object):
                 else:
                     selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
                 selected_indexes.extend(selected_indexes_per_lb)
+            print('selected_indexes:', selected_indexes)
             features_novel_final = features_novel_train[selected_indexes]
             labels_novel_final = [labels_novel_train[idx] for idx in selected_indexes]
         else:
@@ -576,6 +577,7 @@ class FSL_PN_GAN(FSL):
                 else:
                     selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
                 selected_indexes_novel[lb] = selected_indexes_per_lb
+            print('selected_indexes_novel:', selected_indexes_novel)
             #### randomly sample n_aug-n_shot features from each class (with replacement) and aggregate them to make hallucination seed
             n_hal = n_aug - n_shot
             features_seed_all = np.empty([n_hal * len(all_novel_labels), self.fc_dim])
@@ -1049,6 +1051,7 @@ class FSL_PN_PoseRef(FSL):
                     selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
                 selected_indexes_novel[lb] = selected_indexes_per_lb
                 # fnames_novel.append(fnames_novel_train[selected_indexes_per_lb[0]])
+            print('selected_indexes_novel:', selected_indexes_novel)
             #### Make the "real_features" array
             n_hal = n_aug - n_shot
             real_features = np.empty([len(all_novel_labels), n_shot, self.fc_dim])
@@ -1494,6 +1497,7 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
                     selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
                 selected_indexes_novel[lb] = selected_indexes_per_lb
                 # fnames_novel.append(fnames_novel_train[selected_indexes_per_lb[0]])
+            print('selected_indexes_novel:', selected_indexes_novel)
             #### Make the "real_features" array
             n_hal = n_aug - n_shot
             real_features = np.empty([len(all_novel_labels), n_shot, self.fc_dim])

@@ -79,36 +79,27 @@ def main():
 # Hallucination and training
 def train(args):
     print('============================ train ============================')
+    novel_idx = None
     if args.exp_tag == 'cv':
         train_novel_fname = 'cv_novel_train_feat'
         train_base_fname = 'cv_base_train_feat'
         if os.path.exists(os.path.join(args.result_path, args.extractor_folder, 'cv_novel_idx_%d.npy' % args.ite_idx)):
             novel_idx = np.load(os.path.join(args.result_path, args.extractor_folder, 'cv_novel_idx_%d.npy' % args.ite_idx))
-        else:
-            novel_idx = None
-        # print()
-        # for i in range(5):
-        #     print(novel_idx[i,:])
-        # print()
     elif args.exp_tag == 'final':
         train_novel_fname = 'final_novel_train_feat'
         train_base_fname = 'final_base_train_feat'
         if os.path.exists(os.path.join(args.result_path, args.extractor_folder, 'final_novel_idx_%d.npy' % args.ite_idx)):
             novel_idx = np.load(os.path.join(args.result_path, args.extractor_folder, 'final_novel_idx_%d.npy' % args.ite_idx))
-        else:
-            novel_idx = None
-        # print()
-        # for i in range(5):
-        #     print(novel_idx[i,:])
-        # print()
     elif args.exp_tag == 'val':
         train_novel_fname = 'val_train_feat'
         train_base_fname = 'base_train_feat'
-        novel_idx = None
+        if os.path.exists(os.path.join(args.result_path, args.extractor_folder, 'selected_val_idx_%d.npy' % args.ite_idx)):
+            novel_idx = np.load(os.path.join(args.result_path, args.extractor_folder, 'selected_val_idx_%d.npy' % args.ite_idx))
     elif args.exp_tag == 'novel':
         train_novel_fname = 'novel_train_feat'
         train_base_fname = 'base_train_feat'
-        novel_idx = None
+        if os.path.exists(os.path.join(args.result_path, args.extractor_folder, 'selected_novel_idx_%d.npy' % args.ite_idx)):
+            novel_idx = np.load(os.path.join(args.result_path, args.extractor_folder, 'selected_novel_idx_%d.npy' % args.ite_idx))
     
     tf.reset_default_graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
@@ -348,9 +339,9 @@ def inference(args):
 
 # Visualization
 def plot(samples, n_row, n_col, x_dim=84, title=None, subtitles=None, fontsize=20):
-    fig = plt.figure(figsize=(n_col*2, n_row*2))
+    fig = plt.figure(figsize=(n_col*2, n_row*2.2))
     gs = gridspec.GridSpec(n_row, n_col)
-    gs.update(wspace=0.05, hspace=0.05)
+    gs.update(wspace=0.05, hspace=0.2)
     for i, sample in enumerate(samples):
         ax = plt.subplot(gs[i])
         plt.axis('off')
@@ -489,6 +480,9 @@ def visualize(args):
     features_base_train = train_base_dict['features']
     labels_base_train = train_base_dict[args.label_key]
     fnames_base_train = train_base_dict['image_names']
+    features_all_train = np.concatenate((features_novel_train, features_base_train), axis=0)
+    labels_all_train = labels_novel_train + labels_base_train
+    fnames_all_train = fnames_novel_train + fnames_base_train
     ## (2) Load training results
     training_results = np.load(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'results.npy'), allow_pickle=True)
     features_novel_final_dict = training_results[2]
@@ -561,6 +555,8 @@ def visualize(args):
             nearest_differences_hal = []
             nearest_indexes_pose = []
             nearest_differences_pose = []
+            nearest_indexes_hal_all = []
+            nearest_differences_hal_all = []
             n_hal_plot = min(8, args.n_aug-args.n_shot)
             for idx in range(n_hal_plot):
                 nearest_idx, nearest_diff = find_nearest_idx(features_novel_train, considered_feat_hal[idx])
@@ -569,10 +565,15 @@ def visualize(args):
                 nearest_idx, nearest_diff = find_nearest_idx(features_base_train, considered_feat_pose[idx])
                 nearest_indexes_pose.append(nearest_idx)
                 nearest_differences_pose.append(nearest_diff)
+                nearest_idx, nearest_diff = find_nearest_idx(features_all_train, considered_feat_hal[idx])
+                nearest_indexes_hal_all.append(nearest_idx)
+                nearest_differences_hal_all.append(nearest_diff)
 
             x_dim = 84
-            img_array = np.empty((3*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
-            subtitles = []
+            img_array = np.empty((4*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
+            nearest_class_pose = []
+            nearest_class_hal = []
+            nearest_class_hal_all = []
             for i in range(len(nearest_indexes_hal)):
                 ## (1) put seed image in the 1st row
                 file_path = os.path.join(args.image_path, fnames_novel_train[nearest_idx_seed])
@@ -587,16 +588,25 @@ def visualize(args):
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i+len(nearest_indexes_hal),:] = img
-                ## (3) put hal image in the 3rd row
+                nearest_class_pose.append(str(labels_base_train[idx]))
+                ## (3) put hal image (nearest from novel) in the 3rd row
                 idx = nearest_indexes_hal[i]
                 file_path = os.path.join(args.image_path, fnames_novel_train[idx])
                 img = cv2.imread(file_path, cv2.IMREAD_COLOR)
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i+2*len(nearest_indexes_hal),:] = img
-                subtitles.append(str(labels_novel_train[idx]))
-            # print(subtitles)
-            fig = plot(img_array, 3, n_hal_plot, x_dim=x_dim)
+                nearest_class_hal.append(str(labels_novel_train[idx]))
+                ## (4) put hal image (nearest from all) in the 4th row
+                idx = nearest_indexes_hal_all[i]
+                file_path = os.path.join(args.image_path, fnames_all_train[idx])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i+3*len(nearest_indexes_hal),:] = img
+                nearest_class_hal_all.append(str(labels_all_train[idx]))
+            subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + nearest_class_pose + nearest_class_hal + nearest_class_hal_all
+            fig = plot(img_array, 4, n_hal_plot, x_dim=x_dim, subtitles=subtitle_list, fontsize=10)
             plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
     else:
         for lb_idx in range(5):
@@ -607,17 +617,21 @@ def visualize(args):
             nearest_idx_seed, nearest_diff_seed = find_nearest_idx(features_novel_train, considered_feat_seed[0])
             nearest_indexes_hal = []
             nearest_differences_hal = []
-            nearest_indexes_pose = []
-            nearest_differences_pose = []
+            nearest_indexes_hal_all = []
+            nearest_differences_hal_all = []
             n_hal_plot = min(8, args.n_aug-args.n_shot)
             for idx in range(n_hal_plot):
                 nearest_idx, nearest_diff = find_nearest_idx(features_novel_train, considered_feat_hal[idx])
                 nearest_indexes_hal.append(nearest_idx)
                 nearest_differences_hal.append(nearest_diff)
+                nearest_idx, nearest_diff = find_nearest_idx(features_all_train, considered_feat_hal[idx])
+                nearest_indexes_hal_all.append(nearest_idx)
+                nearest_differences_hal_all.append(nearest_diff)
 
             x_dim = 84
-            img_array = np.empty((2*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
-            subtitles = []
+            img_array = np.empty((3*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
+            nearest_class_hal = []
+            nearest_class_hal_all = []
             for i in range(len(nearest_indexes_hal)):
                 ## (1) put seed image in the 1st row
                 file_path = os.path.join(args.image_path, fnames_novel_train[nearest_idx_seed])
@@ -625,16 +639,24 @@ def visualize(args):
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i,:] = img
-                ## (2) put hal image in the 2nd row
+                ## (2) put hal image (nearest from novel) in the 2nd row
                 idx = nearest_indexes_hal[i]
                 file_path = os.path.join(args.image_path, fnames_novel_train[idx])
                 img = cv2.imread(file_path, cv2.IMREAD_COLOR)
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i+len(nearest_indexes_hal),:] = img
-                subtitles.append(str(labels_novel_train[idx]))
-            # print(subtitles)
-            fig = plot(img_array, 2, n_hal_plot, x_dim=x_dim)
+                nearest_class_hal.append(str(labels_novel_train[idx]))
+                ## (3) put hal image (nearest from all) in the 3rd row
+                idx = nearest_indexes_hal_all[i]
+                file_path = os.path.join(args.image_path, fnames_all_train[idx])
+                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_array[i+2*len(nearest_indexes_hal),:] = img
+                nearest_class_hal_all.append(str(labels_all_train[idx]))
+            subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + nearest_class_hal + nearest_class_hal_all
+            fig = plot(img_array, 3, n_hal_plot, x_dim=x_dim, subtitles=subtitle_list, fontsize=10)
             plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
     ## (7) Visualize class codes and pose codes
     X_code_class = None
@@ -664,7 +686,7 @@ def visualize(args):
         for lb in lb_for_dim_reduction:
             idx_for_this_lb = [i for i in range(len(labels_novel_train)) if labels_novel_train[i] == lb]
             pose_code_for_this_lb = novel_code_pose_all[idx_for_this_lb,:]
-            if X_code_class is None:
+            if X_code_pose is None:
                 X_code_pose = pose_code_for_this_lb
             else:
                 X_code_pose = np.concatenate((X_code_pose, pose_code_for_this_lb), axis=0)
