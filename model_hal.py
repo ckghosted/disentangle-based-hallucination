@@ -888,6 +888,7 @@ class HAL_PN_PoseRef(object):
                  n_shot=2, ## number of samples per class in the support set
                  n_aug=4, ## number of samples per class in the augmented support set
                  n_query_all=3, ## number of samples in the query set
+                 n_intra=0,
                  fc_dim=512,
                  l2scale=0.001,
                  n_train_class=64,
@@ -916,7 +917,10 @@ class HAL_PN_PoseRef(object):
         self.n_shot = n_shot
         self.n_aug = n_aug
         self.n_query_all = n_query_all
-        self.n_intra = self.n_aug - self.n_shot
+        if n_intra > 0:
+            self.n_intra = n_intra
+        else:
+            self.n_intra = self.n_aug - self.n_shot
         self.fc_dim = fc_dim
         self.l2scale = l2scale
         self.n_train_class = n_train_class
@@ -962,31 +966,31 @@ class HAL_PN_PoseRef(object):
         for lb in range(self.n_train_class):
             self.candidate_indexes_each_lb_train[lb] = [idx for idx in range(len(self.train_label_list)) if self.train_label_list[idx] == lb]
         self.all_train_labels = set(self.train_label_list)
-
-        # if not val_path is None:
-        #     self.val_path = val_path
-        #     self.val_base_dict = unpickle(self.val_path)
-        #     self.val_feat_list = self.val_base_dict['features']
-        #     self.val_fname_list = self.val_base_dict['image_names']
-        #     #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
-        #     #### such that all labels become in the range {0, 1, ..., self.n_train_class-1}
-        #     self.val_class_list_raw = self.val_base_dict[self.label_key]
-        #     all_val_class = sorted(set(self.val_class_list_raw))
-        #     print('original val class labeling:')
-        #     print(all_val_class)
-        #     label_mapping = {}
-        #     self.n_val_class = len(all_val_class)
-        #     for new_lb in range(self.n_val_class):
-        #         label_mapping[all_val_class[new_lb]] = new_lb
-        #     self.val_label_list = np.array([label_mapping[old_lb] for old_lb in self.val_class_list_raw])
-        #     print('new val class labeling:')
-        #     print(sorted(set(self.val_label_list)))
+        
+        self.val_path = val_path
+        if not self.val_path is None:
+            self.val_base_dict = unpickle(self.val_path)
+            self.val_feat_list = self.val_base_dict['features']
+            self.val_fname_list = self.val_base_dict['image_names']
+            #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
+            #### such that all labels become in the range {0, 1, ..., self.n_val_class-1}
+            self.val_class_list_raw = self.val_base_dict[self.label_key]
+            all_val_class = sorted(set(self.val_class_list_raw))
+            print('original val class labeling:')
+            print(all_val_class)
+            label_mapping = {}
+            self.n_val_class = len(all_val_class)
+            for new_lb in range(self.n_val_class):
+                label_mapping[all_val_class[new_lb]] = new_lb
+            self.val_label_list = np.array([label_mapping[old_lb] for old_lb in self.val_class_list_raw])
+            print('new val class labeling:')
+            print(sorted(set(self.val_label_list)))
             
-        #     ### [2020/03/21] make candidate indexes for each label
-        #     self.candidate_indexes_each_lb_val = {}
-        #     for lb in range(self.n_val_class):
-        #         self.candidate_indexes_each_lb_val[lb] = [idx for idx in range(len(self.val_label_list)) if self.val_label_list[idx] == lb]
-        #     self.all_val_labels = set(self.val_label_list)
+            ### [2020/03/21] make candidate indexes for each label
+            self.candidate_indexes_each_lb_val = {}
+            for lb in range(self.n_val_class):
+                self.candidate_indexes_each_lb_val[lb] = [idx for idx in range(len(self.val_label_list)) if self.val_label_list[idx] == lb]
+            self.all_val_labels = set(self.val_label_list)
     
     def build_model(self):
         ### training parameters
@@ -1063,27 +1067,59 @@ class HAL_PN_PoseRef(object):
         ### collect update operations for moving-means and moving-variances for batch normalizations
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
+        ### [2020/05/23b] Follow DRIT (H.-Y. Lee and H.-Y. Tseng, ECCV 2018) to use a discriminator to encourage encoder_pose() to not encode any class-specific information
+        ### (1) Prepare real labels
+        self.labels_real = tf.tile(tf.expand_dims(self.pose_ref_labels, axis=1), multiples=[1, self.n_aug-self.n_shot]) #### shape: [self.n_way, self.n_aug-self.n_shot]
+        self.labels_real_vec = tf.one_hot(tf.reshape(self.labels_real, shape=[-1]), self.n_train_class)
+        self.labels_fake_vec = (1/self.n_train_class)*tf.ones_like(self.labels_real_vec)
+        # self.all_base_labels_uniform = tf.placeholder(tf.float32, shape=[1, self.n_train_class], name='all_base_labels_uniform')
+        # self.labels_fake_vec = tf.tile(self.all_base_labels_uniform, multiples=[self.m_support*(self.n_aug-self.n_support), 1])
+        ### (2) Compute logits
+        self.logits_pose_code = self.discriminator_pose(self.pose_code, bn_train=self.bn_train_hal, with_BN=self.with_BN)
+        ### (3) Compute loss
+        self.loss_d = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels_real_vec,
+                                                                             logits=self.logits_pose_code,
+                                                                             name='loss_d'))
+        self.loss_d = self.lambda_gan * self.loss_d
+        self.loss_g = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels_fake_vec,
+                                                                             logits=self.logits_pose_code,
+                                                                             name='loss_g'))
+
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        self.update_ops_d = [op for op in tf.get_collection(tf.GraphKeys.UPDATE_OPS) if not op in self.update_ops]
+
         self.loss_all = self.lambda_meta * self.loss_pro_aug + \
                         self.lambda_recon * self.loss_support_recon + \
                         self.lambda_consistency * self.loss_pose_ref_recon + \
                         self.lambda_consistency_pose * self.loss_pose_code_recon + \
-                        self.lambda_intra * self.loss_intra
+                        self.lambda_intra * self.loss_intra + \
+                        self.lambda_gan * self.loss_g
         
         ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
         ### trainable variables
         self.trainable_vars = tf.trainable_variables()
+        self.trainable_vars_d = [var for var in self.trainable_vars if ('discriminator' in var.name)]
+        self.trainable_vars_g = [var for var in self.trainable_vars if ('discriminator' not in var.name)]
         ### regularizers
         self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         self.used_regs = [reg for reg in self.all_regs if \
                           ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        self.used_regs_d = [reg for reg in self.all_regs if \
+                            ('discriminator' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
+        self.used_regs_g = [reg for reg in self.all_regs if \
+                            ('discriminator' not in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
         
         ### optimizer
+        with tf.control_dependencies(self.update_ops_d):
+            self.opt_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                beta1=0.5).minimize(self.loss_d+sum(self.used_regs_d),
+                                                                    var_list=self.trainable_vars_d)
         with tf.control_dependencies(self.update_ops):
-            self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
-                                              beta1=0.5).minimize(self.loss_all+sum(self.used_regs),
-                                                                  var_list=self.trainable_vars)
+            self.opt_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                beta1=0.5).minimize(self.loss_all+sum(self.used_regs_g),
+                                                                    var_list=self.trainable_vars_g)
         
         ### model saver (keep the best checkpoint)
         self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)
@@ -1192,12 +1228,34 @@ class HAL_PN_PoseRef(object):
             loss_ite_val = []
             acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
-                # if self.lambda_tf > 0:
-                #     for i_d_update in range(self.d_per_g):
-                #         _ = self.sess.run(self.opt_d,
-                #                           feed_dict={self.bn_train_hal: False,
-                #                                      self.learning_rate: lr})
-                ##### make episode
+                if self.lambda_gan > 0:
+                    for i_d_update in range(self.d_per_g):
+                        ####### make a small episode (no need query for discriminator training)
+                        skip_this_episode = False
+                        selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                        selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
+                        try:
+                            selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
+                                                for lb_idx in range(self.n_way)]
+                            selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
+                                                     for lb_idx in range(self.n_way)]
+                        except:
+                            print('[Discriminator Training] Skip this episode since there are not enough samples for some label')
+                            skip_this_episode = True
+                        if skip_this_episode:
+                            continue
+                        support_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx]] for lb_idx in range(self.n_way)])
+                        support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                        pose_ref_features = np.concatenate([self.train_feat_list[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
+                        pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
+                        pose_ref_labels = selected_lbs_pose
+                        _ = self.sess.run(self.opt_d,
+                                          feed_dict={self.support_features: support_features,
+                                                     self.pose_ref_features: pose_ref_features,
+                                                     self.pose_ref_labels: pose_ref_labels,
+                                                     self.bn_train_hal: True,
+                                                     self.learning_rate: lr})
+                ##### make a complete episode
                 skip_this_episode = False
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
@@ -1223,7 +1281,7 @@ class HAL_PN_PoseRef(object):
                 pose_ref_labels = selected_lbs_pose
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
                 pose_ref_classes = np.array([self.train_class_list_raw[selected_indexes_pose[i][0]] for i in range(self.n_way)])
-                _, loss, acc, x_tilde_i, x_hat_j, x_hat_i, x_bar_i = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.transformed_pose_ref, self.pose_ref_recon, self.support_recon, self.transformed_pose_ref_intra],
+                _, loss, acc, x_tilde_i, x_hat_j, x_hat_i, x_bar_i = self.sess.run([self.opt_g, self.loss_all, self.acc_pro_aug, self.transformed_pose_ref, self.pose_ref_recon, self.support_recon, self.transformed_pose_ref_intra],
                                              feed_dict={self.support_features: support_features,
                                                         self.query_features: query_features,
                                                         self.query_labels: query_labels,
@@ -1309,56 +1367,61 @@ class HAL_PN_PoseRef(object):
                     fig = plot(img_array, 7, m_support_considered, x_dim=x_dim)
                     plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
             
-            ## validation on val classes
-            # for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
-            #     ##### make episode
-            #     skip_this_episode = False
-            #     selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
-            #     selected_lbs_pose = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
-            #     try:
-            #         selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_val[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
-            #                             for lb_idx in range(self.n_way)]
-            #         selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
-            #                                  for lb_idx in range(self.n_way)]
-            #     except:
-            #         print('[Training] Skip this episode since there are not enough samples for some label')
-            #         skip_this_episode = True
-            #     if skip_this_episode:
-            #         continue
-            #     support_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][0:self.n_shot]] for lb_idx in range(self.n_way)])
-            #     support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
-            #     query_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
-            #     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
-            #     pose_ref_features = np.concatenate([self.train_feat_list[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
-            #     pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
-            #     loss, acc = self.sess.run([self.loss_pro_aug, self.acc_pro_aug],
-            #                                  feed_dict={self.support_features: support_features,
-            #                                             self.query_features: query_features,
-            #                                             self.query_labels: query_labels,
-            #                                             self.pose_ref_features: pose_ref_features,
-            #                                             self.pose_ref_intra_features: pose_ref_intra_features,
-            #                                             self.bn_train_hal: False})
-            #     loss_ite_val.append(loss)
-            #     acc_ite_val.append(np.mean(acc))
+            #### validation on val classes
+            if not self.val_path is None:
+                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                    ##### make episode
+                    skip_this_episode = False
+                    selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
+                    selected_lbs_pose = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                    try:
+                        selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_val[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
+                                            for lb_idx in range(self.n_way)]
+                        selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
+                                                 for lb_idx in range(self.n_way)]
+                    except:
+                        print('[Validation] Skip this episode since there are not enough samples for some label')
+                        skip_this_episode = True
+                    if skip_this_episode:
+                        continue
+                    support_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][0:self.n_shot]] for lb_idx in range(self.n_way)])
+                    support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                    query_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
+                    query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
+                    pose_ref_features = np.concatenate([self.train_feat_list[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
+                    pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
+                    loss, acc = self.sess.run([self.loss_pro_aug, self.acc_pro_aug],
+                                              feed_dict={self.support_features: support_features,
+                                                         self.query_features: query_features,
+                                                         self.query_labels: query_labels,
+                                                         self.pose_ref_features: pose_ref_features,
+                                                         self.bn_train_hal: False})
+                    loss_ite_val.append(loss)
+                    acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
-            # loss_val.append(np.mean(loss_ite_val))
-            # acc_val.append(np.mean(acc_ite_val))
-            # print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, validation loss: %f, validation accuracy: %f' % \
-            #     (epoch, lr, loss_train[-1], acc_train[-1], loss_val[-1], acc_val[-1]))
-            #### save model if improvement
-            # if best_val_loss is None or loss_val[-1] < best_val_loss:
-            #     best_val_loss = loss_val[-1]
-            #     self.saver_hal_pro.save(self.sess,
-            #                             os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
-            #                             global_step=epoch)
-            print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
-                (epoch, lr, loss_train[-1], acc_train[-1]))
-        self.saver_hal_pro.save(self.sess,
-                                os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
-                                global_step=epoch)
+            if not self.val_path is None:
+                loss_val.append(np.mean(loss_ite_val))
+                acc_val.append(np.mean(acc_ite_val))
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, validation loss: %f, validation accuracy: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1], loss_val[-1], acc_val[-1]))
+                ### save model if improvement
+                if best_val_loss is None or loss_val[-1] < best_val_loss:
+                    best_val_loss = loss_val[-1]
+                    self.saver_hal_pro.save(self.sess,
+                                            os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                            global_step=epoch)
+            else:
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1]))
         print('time: %4.4f' % (time.time() - start_time))
-        return [loss_train, acc_train]
+        if self.val_path is None:
+            self.saver_hal_pro.save(self.sess,
+                                    os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                    global_step=epoch)
+            return [loss_train, acc_train]
+        else:
+            return [loss_train, acc_train, loss_val, acc_val]
 
 class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
     def __init__(self,
@@ -1372,6 +1435,7 @@ class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
                  n_shot=2, ## number of samples per class in the support set
                  n_aug=4, ## number of samples per class in the augmented support set
                  n_query_all=3, ## number of samples in the query set
+                 n_intra=0,
                  fc_dim=512,
                  l2scale=0.001,
                  n_train_class=64,
@@ -1401,6 +1465,7 @@ class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
                                                     n_shot,
                                                     n_aug,
                                                     n_query_all,
+                                                    n_intra,
                                                     fc_dim,
                                                     l2scale,
                                                     n_train_class,
@@ -1495,27 +1560,59 @@ class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
         ### collect update operations for moving-means and moving-variances for batch normalizations
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
+        ### [2020/05/23b] Follow DRIT (H.-Y. Lee and H.-Y. Tseng, ECCV 2018) to use a discriminator to encourage encoder_pose() to not encode any class-specific information
+        ### (1) Prepare real labels
+        self.labels_real = tf.tile(tf.expand_dims(self.pose_ref_labels, axis=1), multiples=[1, self.n_aug-self.n_shot]) #### shape: [self.n_way, self.n_aug-self.n_shot]
+        self.labels_real_vec = tf.one_hot(tf.reshape(self.labels_real, shape=[-1]), self.n_train_class)
+        self.labels_fake_vec = (1/self.n_train_class)*tf.ones_like(self.labels_real_vec)
+        # self.all_base_labels_uniform = tf.placeholder(tf.float32, shape=[1, self.n_train_class], name='all_base_labels_uniform')
+        # self.labels_fake_vec = tf.tile(self.all_base_labels_uniform, multiples=[self.m_support*(self.n_aug-self.n_support), 1])
+        ### (2) Compute logits
+        self.logits_pose_code = self.discriminator_pose(self.pose_code, bn_train=self.bn_train_hal, with_BN=self.with_BN)
+        ### (3) Compute loss
+        self.loss_d = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels_real_vec,
+                                                                             logits=self.logits_pose_code,
+                                                                             name='loss_d'))
+        self.loss_d = self.lambda_gan * self.loss_d
+        self.loss_g = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels_fake_vec,
+                                                                             logits=self.logits_pose_code,
+                                                                             name='loss_g'))
+        
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        self.update_ops_d = [op for op in tf.get_collection(tf.GraphKeys.UPDATE_OPS) if not op in self.update_ops]
+
         self.loss_all = self.lambda_meta * self.loss_pro_aug + \
                         self.lambda_recon * self.loss_support_recon + \
                         self.lambda_consistency * self.loss_pose_ref_recon + \
                         self.lambda_consistency_pose * self.loss_pose_code_recon + \
-                        self.lambda_intra * self.loss_intra
+                        self.lambda_intra * self.loss_intra + \
+                        self.lambda_gan * self.loss_g
         
         ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
         ### trainable variables
         self.trainable_vars = tf.trainable_variables()
+        self.trainable_vars_d = [var for var in self.trainable_vars if ('discriminator' in var.name)]
+        self.trainable_vars_g = [var for var in self.trainable_vars if ('discriminator' not in var.name)]
         ### regularizers
         self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         self.used_regs = [reg for reg in self.all_regs if \
                           ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        self.used_regs_d = [reg for reg in self.all_regs if \
+                            ('discriminator' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
+        self.used_regs_g = [reg for reg in self.all_regs if \
+                            ('discriminator' not in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
         
         ### optimizer
+        with tf.control_dependencies(self.update_ops_d):
+            self.opt_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                beta1=0.5).minimize(self.loss_d+sum(self.used_regs_d),
+                                                                    var_list=self.trainable_vars_d)
         with tf.control_dependencies(self.update_ops):
-            self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
-                                              beta1=0.5).minimize(self.loss_all+sum(self.used_regs),
-                                                                  var_list=self.trainable_vars)
+            self.opt_g = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                beta1=0.5).minimize(self.loss_all+sum(self.used_regs_g),
+                                                                    var_list=self.trainable_vars_g)
         
         ### model saver (keep the best checkpoint)
         self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)

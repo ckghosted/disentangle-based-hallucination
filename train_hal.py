@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--n_shot', default=5, type=int, help='Number of samples per class in the support set')
     parser.add_argument('--n_aug', default=20, type=int, help='Number of samples per class in the augmented support set')
     parser.add_argument('--n_query_all', default=100, type=int, help='Number of samples in the query set')
+    parser.add_argument('--n_intra', default=0, type=int, help='Number of intra-class samples for each class in the support set')
     parser.add_argument('--num_epoch', default=100, type=int, help='Number of epochs')
     parser.add_argument('--lr_start', default=1e-5, type=float, help='Initial learning rate for episodic training')
     parser.add_argument('--lr_decay', default=0.5, type=float, help='Learning rate decay factor for episodic training')
@@ -66,6 +67,8 @@ def main():
     parser.add_argument('--num_parallel_calls', default=4, type=int, help='Number of core used to prepare data')
     parser.add_argument('--exp_tag', type=str, help='cv, final, or common')
     parser.add_argument('--ave_before_encode', action='store_true', help='Use class HAL_PN_PoseRef_Before (take feature average before class encoder) if present')
+    parser.add_argument('--run_validation', action='store_true', help='Use val_train_feat to pick the best hallucinator if present')
+    parser.add_argument('--d_per_g', default=5, type=int, help='Number of discriminator updates per generator update')
     args = parser.parse_args()
     train(args)
 
@@ -80,7 +83,10 @@ def train(args):
         train_pickled_fname = 'base_train_feat'
         val_pickled_fname = 'val_train_feat'
     train_path = os.path.join(args.result_path, args.extractor_folder, train_pickled_fname)
-    val_path = os.path.join(args.result_path, args.extractor_folder, val_pickled_fname)
+    if args.run_validation:
+        val_path = os.path.join(args.result_path, args.extractor_folder, val_pickled_fname)
+    else:
+        val_path = None
     
     tf.reset_default_graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
@@ -160,6 +166,7 @@ def train(args):
                                      n_shot=args.n_shot,
                                      n_aug=args.n_aug,
                                      n_query_all=args.n_query_all,
+                                     n_intra=args.n_intra,
                                      fc_dim=args.fc_dim,
                                      l2scale=args.l2scale,
                                      n_train_class=args.n_train_class,
@@ -174,7 +181,8 @@ def train(args):
                                      lambda_pose_code_reg=args.lambda_pose_code_reg,
                                      lambda_aux=args.lambda_aux,
                                      lambda_gan=args.lambda_gan,
-                                     lambda_tf=args.lambda_tf)
+                                     lambda_tf=args.lambda_tf,
+                                     d_per_g=args.d_per_g)
             else:
                 print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef')
                 net = HAL_PN_PoseRef(sess,
@@ -187,6 +195,7 @@ def train(args):
                                      n_shot=args.n_shot,
                                      n_aug=args.n_aug,
                                      n_query_all=args.n_query_all,
+                                     n_intra=args.n_intra,
                                      fc_dim=args.fc_dim,
                                      l2scale=args.l2scale,
                                      n_train_class=args.n_train_class,
@@ -201,7 +210,8 @@ def train(args):
                                      lambda_pose_code_reg=args.lambda_pose_code_reg,
                                      lambda_aux=args.lambda_aux,
                                      lambda_gan=args.lambda_gan,
-                                     lambda_tf=args.lambda_tf)
+                                     lambda_tf=args.lambda_tf,
+                                     d_per_g=args.d_per_g)
         else:
             print('train_hal.py --> main() --> train(): use HAL_PN_baseline')
             print('No HAL_PN_baseline for few-shot multiclass classification experiments!')
@@ -236,21 +246,40 @@ def train(args):
     
     # Plot learning curve
     results = np.load(os.path.join(args.result_path, args.hallucinator_name, 'results.npy'))
-    fig, ax = plt.subplots(1,2, figsize=(15,6))
-    ax[0].plot(range(1, len(results[0])+1), results[0], label='Training error')
-    ax[0].set_xticks(np.arange(1, len(results[0])+1))
-    ax[0].set_xlabel('Training epochs', fontsize=16)
-    ax[0].set_ylabel('Cross entropy', fontsize=16)
-    ax[0].legend(fontsize=16)
-    ax[1].plot(range(1, len(results[1])+1), results[1], label='Training accuracy')
-    ax[1].set_xticks(np.arange(1, len(results[1])+1))
-    ax[1].set_xlabel('Training epochs', fontsize=16)
-    ax[1].set_ylabel('Accuracy', fontsize=16)
-    ax[1].legend(fontsize=16)
-    plt.suptitle('Learning Curve', fontsize=20)
-    fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'learning_curve.jpg'),
-                bbox_inches='tight')
-    plt.close(fig)
+    if args.run_validation:
+        fig, ax = plt.subplots(1,2, figsize=(15,6))
+        ax[0].plot(range(1, len(results[0])+1), results[0], label='Training error')
+        ax[0].plot(range(1, len(results[2])+1), results[2], label='Validation error')
+        ax[0].set_xticks(np.arange(1, len(results[0])+1))
+        ax[0].set_xlabel('Training epochs', fontsize=16)
+        ax[0].set_ylabel('Cross entropy', fontsize=16)
+        ax[0].legend(fontsize=16)
+        ax[1].plot(range(1, len(results[1])+1), results[1], label='Training accuracy')
+        ax[1].plot(range(1, len(results[3])+1), results[3], label='Validation accuracy')
+        ax[1].set_xticks(np.arange(1, len(results[1])+1))
+        ax[1].set_xlabel('Training epochs', fontsize=16)
+        ax[1].set_ylabel('Accuracy', fontsize=16)
+        ax[1].legend(fontsize=16)
+        plt.suptitle('Learning Curve', fontsize=20)
+        fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'learning_curve.jpg'),
+                    bbox_inches='tight')
+        plt.close(fig)
+    else:
+        fig, ax = plt.subplots(1,2, figsize=(15,6))
+        ax[0].plot(range(1, len(results[0])+1), results[0], label='Training error')
+        ax[0].set_xticks(np.arange(1, len(results[0])+1))
+        ax[0].set_xlabel('Training epochs', fontsize=16)
+        ax[0].set_ylabel('Cross entropy', fontsize=16)
+        ax[0].legend(fontsize=16)
+        ax[1].plot(range(1, len(results[1])+1), results[1], label='Training accuracy')
+        ax[1].set_xticks(np.arange(1, len(results[1])+1))
+        ax[1].set_xlabel('Training epochs', fontsize=16)
+        ax[1].set_ylabel('Accuracy', fontsize=16)
+        ax[1].legend(fontsize=16)
+        plt.suptitle('Learning Curve', fontsize=20)
+        fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'learning_curve.jpg'),
+                    bbox_inches='tight')
+        plt.close(fig)
 
 
 
