@@ -907,7 +907,8 @@ class HAL_PN_PoseRef(object):
                  lambda_gan=0.0,
                  lambda_tf=0.0,
                  gp_scale=10.0,
-                 d_per_g=5):
+                 d_per_g=5,
+                 n_gallery_per_class=0):
         self.sess = sess
         self.model_name = model_name
         self.result_path = result_path
@@ -960,11 +961,41 @@ class HAL_PN_PoseRef(object):
         self.train_label_list = np.array([label_mapping[old_lb] for old_lb in self.train_class_list_raw])
         print('new train class labeling:')
         print(sorted(set(self.train_label_list)))
+
+        ### make the gallery set and the probe set
+        self.n_gallery_per_class = n_gallery_per_class
+        if self.n_gallery_per_class > 0:
+            gallery_index_path = os.path.join(os.path.dirname(self.train_path), 'gallery_indices_%d.npy' % self.n_gallery_per_class)
+            if os.path.exists(gallery_index_path):
+                gallery_index_array = np.load(gallery_index_path, allow_pickle=True)
+            else:
+                gallery_index_list = []
+                for lb in sorted(set(self.train_label_list)):
+                    candidate_indexes_per_lb = [idx for idx in range(len(self.train_label_list)) if self.train_label_list[idx] == lb]
+                    gallery_index_list.append(np.random.choice(candidate_indexes_per_lb, self.n_gallery_per_class, replace=False))
+                gallery_index_array = np.concatenate(gallery_index_list)
+                np.save(gallery_index_path, gallery_index_array)
+            self.train_feat_list_gallery = self.train_feat_list[gallery_index_array]
+            self.train_label_list_gallery = [self.train_label_list[idx] for idx in range(len(self.train_label_list)) if idx in gallery_index_array]
+            self.train_fname_list_gallery = [self.train_fname_list[idx] for idx in range(len(self.train_fname_list)) if idx in gallery_index_array]
+            self.train_feat_list_probe = np.delete(self.train_feat_list, gallery_index_array, axis=0)
+            self.train_label_list_probe = [self.train_label_list[idx] for idx in range(len(self.train_label_list)) if not idx in gallery_index_array]
+            self.train_fname_list_probe = [self.train_fname_list[idx] for idx in range(len(self.train_fname_list)) if not idx in gallery_index_array]
+        else:
+            #### use the whole base-class dataset as both the gallery set and the probe set
+            self.train_feat_list_gallery = self.train_feat_list
+            self.train_label_list_gallery = self.train_label_list
+            self.train_fname_list_gallery = self.train_fname_list
+            self.train_feat_list_probe = self.train_feat_list
+            self.train_label_list_probe = self.train_label_list
+            self.train_fname_list_probe = self.train_fname_list
         
         ### [2020/03/21] make candidate indexes for each label
-        self.candidate_indexes_each_lb_train = {}
+        self.candidate_indexes_each_lb_gallery = {}
+        self.candidate_indexes_each_lb_probe = {}
         for lb in range(self.n_train_class):
-            self.candidate_indexes_each_lb_train[lb] = [idx for idx in range(len(self.train_label_list)) if self.train_label_list[idx] == lb]
+            self.candidate_indexes_each_lb_gallery[lb] = [idx for idx in range(len(self.train_label_list_gallery)) if self.train_label_list_gallery[idx] == lb]
+            self.candidate_indexes_each_lb_probe[lb] = [idx for idx in range(len(self.train_label_list_probe)) if self.train_label_list_probe[idx] == lb]
         self.all_train_labels = set(self.train_label_list)
         
         self.val_path = val_path
@@ -1235,18 +1266,18 @@ class HAL_PN_PoseRef(object):
                         selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                         selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
                         try:
-                            selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
+                            selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_probe[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
                                                 for lb_idx in range(self.n_way)]
-                            selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
+                            selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_gallery[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
                                                      for lb_idx in range(self.n_way)]
                         except:
                             print('[Discriminator Training] Skip this episode since there are not enough samples for some label')
                             skip_this_episode = True
                         if skip_this_episode:
                             continue
-                        support_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx]] for lb_idx in range(self.n_way)])
+                        support_features = np.concatenate([self.train_feat_list_probe[selected_indexes[lb_idx]] for lb_idx in range(self.n_way)])
                         support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
-                        pose_ref_features = np.concatenate([self.train_feat_list[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
+                        pose_ref_features = np.concatenate([self.train_feat_list_gallery[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
                         pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
                         pose_ref_labels = selected_lbs_pose
                         _ = self.sess.run(self.opt_d,
@@ -1260,22 +1291,22 @@ class HAL_PN_PoseRef(object):
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
                 try:
-                    selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_intra+self.n_shot+self.n_query_all//self.n_way, replace=False)) \
+                    selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_probe[selected_lbs[lb_idx]], self.n_intra+self.n_shot+self.n_query_all//self.n_way, replace=False)) \
                                         for lb_idx in range(self.n_way)]
-                    selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
+                    selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_gallery[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
                                              for lb_idx in range(self.n_way)]
                 except:
                     print('[Training] Skip this episode since there are not enough samples for some label')
                     skip_this_episode = True
                 if skip_this_episode:
                     continue
-                pose_ref_intra_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx][0:self.n_intra]] for lb_idx in range(self.n_way)])
+                pose_ref_intra_features = np.concatenate([self.train_feat_list_probe[selected_indexes[lb_idx][0:self.n_intra]] for lb_idx in range(self.n_way)])
                 pose_ref_intra_features = np.reshape(pose_ref_intra_features, (self.n_way, self.n_intra, self.fc_dim))
-                support_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx][self.n_intra:(self.n_intra+self.n_shot)]] for lb_idx in range(self.n_way)])
+                support_features = np.concatenate([self.train_feat_list_probe[selected_indexes[lb_idx][self.n_intra:(self.n_intra+self.n_shot)]] for lb_idx in range(self.n_way)])
                 support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
-                query_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx][self.n_intra+self.n_shot:]] for lb_idx in range(self.n_way)])
+                query_features = np.concatenate([self.train_feat_list_probe[selected_indexes[lb_idx][self.n_intra+self.n_shot:]] for lb_idx in range(self.n_way)])
                 query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
-                pose_ref_features = np.concatenate([self.train_feat_list[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
+                pose_ref_features = np.concatenate([self.train_feat_list_gallery[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
                 pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
                 support_labels = selected_lbs
                 pose_ref_labels = selected_lbs_pose
@@ -1300,13 +1331,13 @@ class HAL_PN_PoseRef(object):
                 if epoch % n_ep_per_visualization == 0 and ite == n_ite_per_epoch:
                     m_support_considered = 5
                     ###### for each class, just print the first xi/xj/x_tilde_i/...
-                    fnames_x_i = [self.train_fname_list[selected_indexes[lb_idx][self.n_intra]] for lb_idx in range(m_support_considered)]
-                    fnames_x_hat_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_hat_i[lb_idx*self.n_shot]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
-                    fnames_x_i2 = [self.train_fname_list[selected_indexes[lb_idx][0]] for lb_idx in range(m_support_considered)]
-                    fnames_x_bar_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_bar_i[lb_idx*self.n_intra]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
-                    fnames_x_j = [self.train_fname_list[selected_indexes_pose[lb_idx][0]] for lb_idx in range(m_support_considered)]
-                    fnames_x_hat_j = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_hat_j[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
-                    fnames_x_tilde_i = [self.train_fname_list[(np.sum(np.abs(self.train_feat_list - x_tilde_i[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_i = [self.train_fname_list_probe[selected_indexes[lb_idx][self.n_intra]] for lb_idx in range(m_support_considered)]
+                    fnames_x_hat_i = [self.train_fname_list_probe[(np.sum(np.abs(self.train_feat_list_probe - x_hat_i[lb_idx*self.n_shot]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_i2 = [self.train_fname_list_probe[selected_indexes[lb_idx][0]] for lb_idx in range(m_support_considered)]
+                    fnames_x_bar_i = [self.train_fname_list_probe[(np.sum(np.abs(self.train_feat_list_probe - x_bar_i[lb_idx*self.n_intra]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_j = [self.train_fname_list_gallery[selected_indexes_pose[lb_idx][0]] for lb_idx in range(m_support_considered)]
+                    fnames_x_hat_j = [self.train_fname_list_gallery[(np.sum(np.abs(self.train_feat_list_gallery - x_hat_j[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
+                    fnames_x_tilde_i = [self.train_fname_list_probe[(np.sum(np.abs(self.train_feat_list_probe - x_tilde_i[lb_idx*(self.n_aug-self.n_shot)]), axis=1)).argmin()] for lb_idx in range(m_support_considered)]
                     # for idx_way in range(m_support_considered):
                     #     print('============================================================')
                     #     print(fnames_x_i[idx_way])
@@ -1377,7 +1408,7 @@ class HAL_PN_PoseRef(object):
                     try:
                         selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_val[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
                                             for lb_idx in range(self.n_way)]
-                        selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
+                        selected_indexes_pose = [list(np.random.choice(self.candidate_indexes_each_lb_gallery[selected_lbs_pose[lb_idx]], self.n_aug-self.n_shot, replace=False)) \
                                                  for lb_idx in range(self.n_way)]
                     except:
                         print('[Validation] Skip this episode since there are not enough samples for some label')
@@ -1388,7 +1419,7 @@ class HAL_PN_PoseRef(object):
                     support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
                     query_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
                     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
-                    pose_ref_features = np.concatenate([self.train_feat_list[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
+                    pose_ref_features = np.concatenate([self.train_feat_list_gallery[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
                     pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
                     loss, acc = self.sess.run([self.loss_pro_aug, self.acc_pro_aug],
                                               feed_dict={self.support_features: support_features,
@@ -1454,7 +1485,8 @@ class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
                  lambda_gan=0.0,
                  lambda_tf=0.0,
                  gp_scale=10.0,
-                 d_per_g=5):
+                 d_per_g=5,
+                 n_gallery_per_class=0):
         super(HAL_PN_PoseRef_Before, self).__init__(sess,
                                                     model_name,
                                                     result_path,
@@ -1484,7 +1516,8 @@ class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
                                                     lambda_gan,
                                                     lambda_tf,
                                                     gp_scale,
-                                                    d_per_g)
+                                                    d_per_g,
+                                                    n_gallery_per_class)
     
     def build_model(self):
         ### training parameters

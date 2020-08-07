@@ -69,6 +69,7 @@ def main():
     parser.add_argument('--ave_before_encode', action='store_true', help='Use class HAL_PN_PoseRef_Before (take feature average before class encoder) if present')
     parser.add_argument('--run_validation', action='store_true', help='Use val_train_feat to pick the best hallucinator if present')
     parser.add_argument('--d_per_g', default=5, type=int, help='Number of discriminator updates per generator update')
+    parser.add_argument('--n_gallery_per_class', default=0, type=int, help='Number of gallery samples per class (default 0: use the whole base-class dataset as both gallery and probe)')
     args = parser.parse_args()
     train(args)
 
@@ -182,7 +183,8 @@ def train(args):
                                      lambda_aux=args.lambda_aux,
                                      lambda_gan=args.lambda_gan,
                                      lambda_tf=args.lambda_tf,
-                                     d_per_g=args.d_per_g)
+                                     d_per_g=args.d_per_g,
+                                     n_gallery_per_class=args.n_gallery_per_class)
             else:
                 print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef')
                 net = HAL_PN_PoseRef(sess,
@@ -211,7 +213,8 @@ def train(args):
                                      lambda_aux=args.lambda_aux,
                                      lambda_gan=args.lambda_gan,
                                      lambda_tf=args.lambda_tf,
-                                     d_per_g=args.d_per_g)
+                                     d_per_g=args.d_per_g,
+                                     n_gallery_per_class=args.n_gallery_per_class)
         else:
             print('train_hal.py --> main() --> train(): use HAL_PN_baseline')
             print('No HAL_PN_baseline for few-shot multiclass classification experiments!')
