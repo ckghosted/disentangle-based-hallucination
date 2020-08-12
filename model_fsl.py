@@ -650,7 +650,7 @@ class FSL_PN_GAN(FSL):
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=ite)
 
-        if test_mode:        
+        if test_mode:
             ### Get the class codes of all seed and hal features
             features_novel_embeded_dict = {}
             features_novel_final_array = np.empty([len(all_novel_labels), n_aug, self.fc_dim])
@@ -1213,21 +1213,24 @@ class FSL_PN_PoseRef(FSL):
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=ite)
 
-        if test_mode:        
-            ### Get the class codes of all seed and hal features
+        if test_mode:
+            ### Get the class codes and pose codes of all seed and hal features
             features_novel_embeded_dict = {}
+            features_novel_pcode_dict = {}
             features_novel_final_array = np.empty([len(all_novel_labels), n_aug, self.fc_dim])
             lb_counter = 0
             for lb in all_novel_labels:
                 features_novel_final_array[lb_counter,:,:] = features_novel_final_dict[lb]
                 lb_counter += 1
-            features_novel_embeded_array = self.sess.run(self.novel_code_class,
-                                                         feed_dict={self.novel_feat: np.reshape(features_novel_final_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_aug, self.fc_dim]
-                                                                    self.bn_train: False})
+            features_novel_embeded_array, features_novel_pcode_array = self.sess.run([self.novel_code_class, self.novel_code_pose],
+                                                                                     feed_dict={self.novel_feat: np.reshape(features_novel_final_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_aug, self.fc_dim]
+                                                                                                self.bn_train: False})
             features_novel_embeded_array_reshape = np.reshape(features_novel_embeded_array, [len(all_novel_labels), n_aug, self.fc_dim])
+            features_novel_pcode_array_reshape = np.reshape(features_novel_pcode_array, [len(all_novel_labels), n_aug, self.fc_dim])
             lb_counter = 0
             for lb in all_novel_labels:
                 features_novel_embeded_dict[lb] = features_novel_embeded_array_reshape[lb_counter,:,:]
+                features_novel_pcode_dict[lb] = features_novel_pcode_array_reshape[lb_counter,:,:]
                 lb_counter += 1
         
             ### encode novel features using the two encoders for visualization
@@ -1243,7 +1246,23 @@ class FSL_PN_PoseRef(FSL):
                 novel_code_pose_all.append(novel_code_pose)
             novel_code_class_all = np.concatenate(novel_code_class_all, axis=0)
             novel_code_pose_all = np.concatenate(novel_code_pose_all, axis=0)
-            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, novel_code_class_all, novel_code_pose_all, pose_feat_dict]
+
+            ### encode base features using the two encoders for visualization
+            base_code_class_all = []
+            base_code_pose_all = []
+            nBatches_base = int(np.ceil(features_base_train.shape[0] / bsize))
+            for idx in tqdm.tqdm(range(nBatches_base)):
+                batch_features = features_base_train[idx*bsize:(idx+1)*bsize]
+                #### (reuse self.novel_code_class, self.novel_code_pose, and self.novel_feat for convenience)
+                base_code_class, base_code_pose = self.sess.run([self.novel_code_class, self.novel_code_pose],
+                                                                feed_dict={self.novel_feat: batch_features,
+                                                                           self.bn_train: False})
+                base_code_class_all.append(base_code_class)
+                base_code_pose_all.append(base_code_pose)
+            base_code_class_all = np.concatenate(base_code_class_all, axis=0)
+            base_code_pose_all = np.concatenate(base_code_pose_all, axis=0)
+
+            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, features_novel_pcode_dict, novel_code_class_all, novel_code_pose_all, pose_feat_dict, base_code_class_all, base_code_pose_all]
         else:
             return [loss_train, acc_train, features_novel_final_dict, pose_feat_dict]
     
@@ -1661,21 +1680,24 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=ite)
 
-        if test_mode:        
-            ### Get the class codes of all seed and hal features
+        if test_mode:
+            ### Get the class codes and pose codes of all seed and hal features
             features_novel_embeded_dict = {}
+            features_novel_pcode_dict = {}
             features_novel_final_array = np.empty([len(all_novel_labels), n_aug, self.fc_dim])
             lb_counter = 0
             for lb in all_novel_labels:
                 features_novel_final_array[lb_counter,:,:] = features_novel_final_dict[lb]
                 lb_counter += 1
-            features_novel_embeded_array = self.sess.run(self.novel_code_class,
-                                                         feed_dict={self.novel_feat: np.reshape(features_novel_final_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_aug, self.fc_dim]
-                                                                    self.bn_train: False})
+            features_novel_embeded_array, features_novel_pcode_array = self.sess.run([self.novel_code_class, self.novel_code_pose],
+                                                                                     feed_dict={self.novel_feat: np.reshape(features_novel_final_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_aug, self.fc_dim]
+                                                                                                self.bn_train: False})
             features_novel_embeded_array_reshape = np.reshape(features_novel_embeded_array, [len(all_novel_labels), n_aug, self.fc_dim])
+            features_novel_pcode_array_reshape = np.reshape(features_novel_pcode_array, [len(all_novel_labels), n_aug, self.fc_dim])
             lb_counter = 0
             for lb in all_novel_labels:
                 features_novel_embeded_dict[lb] = features_novel_embeded_array_reshape[lb_counter,:,:]
+                features_novel_pcode_dict[lb] = features_novel_pcode_array_reshape[lb_counter,:,:]
                 lb_counter += 1
         
             ### encode novel features using the two encoders for visualization
@@ -1691,7 +1713,23 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
                 novel_code_pose_all.append(novel_code_pose)
             novel_code_class_all = np.concatenate(novel_code_class_all, axis=0)
             novel_code_pose_all = np.concatenate(novel_code_pose_all, axis=0)
-            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, novel_code_class_all, novel_code_pose_all, pose_feat_dict]
+
+            ### encode base features using the two encoders for visualization
+            base_code_class_all = []
+            base_code_pose_all = []
+            nBatches_base = int(np.ceil(features_base_train.shape[0] / bsize))
+            for idx in tqdm.tqdm(range(nBatches_base)):
+                batch_features = features_base_train[idx*bsize:(idx+1)*bsize]
+                #### (reuse self.novel_code_class, self.novel_code_pose, and self.novel_feat for convenience)
+                base_code_class, base_code_pose = self.sess.run([self.novel_code_class, self.novel_code_pose],
+                                                                feed_dict={self.novel_feat: batch_features,
+                                                                           self.bn_train: False})
+                base_code_class_all.append(base_code_class)
+                base_code_pose_all.append(base_code_pose)
+            base_code_class_all = np.concatenate(base_code_class_all, axis=0)
+            base_code_pose_all = np.concatenate(base_code_pose_all, axis=0)
+
+            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, features_novel_pcode_dict, novel_code_class_all, novel_code_pose_all, pose_feat_dict, base_code_class_all, base_code_pose_all]
         else:
             return [loss_train, acc_train, features_novel_final_dict, pose_feat_dict]
     
