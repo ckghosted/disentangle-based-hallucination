@@ -57,7 +57,7 @@ def plot_emb_results(_emb, # 2-dim feature
                      considered_lb,
                      all_labels,
                      n_shot,
-                     n_min,
+                     n_aug,
                      color_list=['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
                                  'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan'],
                      plot_seed=True,
@@ -88,23 +88,23 @@ def plot_emb_results(_emb, # 2-dim feature
                             s=200)
             #### plot all real features as crosses
             if plot_real:
-                plt.scatter(x=X_embedded_lb[n_min:n_feat_per_lb, 0],
-                            y=X_embedded_lb[n_min:n_feat_per_lb, 1],
+                plt.scatter(x=X_embedded_lb[n_aug:n_feat_per_lb, 0],
+                            y=X_embedded_lb[n_aug:n_feat_per_lb, 1],
                             color=color_list[color_idx],
                             alpha=alpha_for_real,  ##### default: 0.3
                             marker='x',
                             s=30)
             #### plot hallucinated features as triangles
             if plot_hal:
-                plt_lb.append(plt.scatter(x=X_embedded_lb[n_shot:n_min, 0],
-                                          y=X_embedded_lb[n_shot:n_min, 1],
+                plt_lb.append(plt.scatter(x=X_embedded_lb[n_shot:n_aug, 0],
+                                          y=X_embedded_lb[n_shot:n_aug, 1],
                                           alpha=alpha_for_hal, ##### default: 0.5
                                           marker='^',
                                           color=color_list[color_idx],
                                           s=60))
             else:
-                plt_lb.append(plt.scatter(x=X_embedded_lb[n_shot:n_min, 0],
-                                          y=X_embedded_lb[n_shot:n_min, 1],
+                plt_lb.append(plt.scatter(x=X_embedded_lb[n_shot:n_aug, 0],
+                                          y=X_embedded_lb[n_shot:n_aug, 1],
                                           alpha=alpha_for_hal, ##### default: 0.5
                                           marker='^',
                                           color='white',
@@ -119,13 +119,13 @@ def plot_emb_results(_emb, # 2-dim feature
                                 color='white',
                                 s=200)
                 if plot_real:
-                    plt.scatter(x=X_embedded_lb[n_min:n_feat_per_lb, 0],
-                                y=X_embedded_lb[n_min:n_feat_per_lb, 1],
+                    plt.scatter(x=X_embedded_lb[n_aug:n_feat_per_lb, 0],
+                                y=X_embedded_lb[n_aug:n_feat_per_lb, 1],
                                 color='white',
                                 marker='x',
                                 s=30)
-                plt.scatter(x=X_embedded_lb[n_shot:n_min, 0],
-                            y=X_embedded_lb[n_shot:n_min, 1],
+                plt.scatter(x=X_embedded_lb[n_shot:n_aug, 0],
+                            y=X_embedded_lb[n_shot:n_aug, 1],
                             marker='^',
                             color='white',
                             s=30)
@@ -1126,6 +1126,14 @@ class HAL_PN_PoseRef(object):
                         self.lambda_intra * self.loss_intra + \
                         self.lambda_gan * self.loss_g
         
+        ### Data flow to extract class codes and pose codes for visualization
+        self.train_feat = tf.placeholder(tf.float32, shape=[None, self.fc_dim], name='train_feat')
+        if self.with_pro:
+            self.train_code_class = self.proto_encoder(self.train_feat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True)
+        else:
+            self.train_code_class = self.train_feat
+        self.train_code_pose = self.encoder_pose(self.train_feat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True)
+
         ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
@@ -1228,7 +1236,8 @@ class HAL_PN_PoseRef(object):
               lr_start=1e-5,
               lr_decay=0.5,
               lr_decay_step=20,
-              patience=10):
+              patience=10,
+              bsize=1000):
         ### create a dedicated folder for this model
         if os.path.exists(os.path.join(self.result_path, self.model_name)):
             print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
@@ -1446,6 +1455,61 @@ class HAL_PN_PoseRef(object):
                 print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
                     (epoch, lr, loss_train[-1], acc_train[-1]))
         print('time: %4.4f' % (time.time() - start_time))
+
+        ### visualize class codes and pose codes
+        train_code_class_all = []
+        train_code_pose_all = []
+        nBatches = int(np.ceil(self.train_feat_list.shape[0] / bsize))
+        for idx in tqdm.tqdm(range(nBatches)):
+            batch_features = self.train_feat_list[idx*bsize:(idx+1)*bsize]
+            train_code_class, train_code_pose = self.sess.run([self.train_code_class, self.train_code_pose],
+                                                              feed_dict={self.train_feat: batch_features,
+                                                                         self.bn_train_hal: False})
+            train_code_class_all.append(train_code_class)
+            train_code_pose_all.append(train_code_pose)
+        train_code_class_all = np.concatenate(train_code_class_all, axis=0)
+        train_code_pose_all = np.concatenate(train_code_pose_all, axis=0)
+        X_code_class = None
+        Y_code = None
+        lb_for_dim_reduction = np.random.choice(sorted(self.all_train_labels), 5, replace=False)
+        for lb in lb_for_dim_reduction:
+            idx_for_this_lb = [i for i in range(len(self.train_label_list)) if self.train_label_list[i] == lb]
+            class_code_for_this_lb = train_code_class_all[idx_for_this_lb,:]
+            labels_for_this_lb = np.repeat(lb, repeats=len(idx_for_this_lb))
+            if X_code_class is None:
+                X_code_class = class_code_for_this_lb
+                Y_code = labels_for_this_lb
+            else:
+                X_code_class = np.concatenate((X_code_class, class_code_for_this_lb), axis=0)
+                Y_code = np.concatenate((Y_code, labels_for_this_lb), axis=0)
+        X_code_class_emb_TSNE30_1000 = dim_reduction(X_code_class, 'TSNE', 2, 30, 1000)
+        considered_lb = lb_for_dim_reduction
+        plot_emb_results(_emb=X_code_class_emb_TSNE30_1000,
+                         _labels=Y_code,
+                         considered_lb=considered_lb,
+                         all_labels=sorted(self.all_train_labels),
+                         n_shot=0,
+                         n_aug=0,
+                         title='class codes',
+                         save_path=os.path.join(self.result_path, self.model_name, 'class_code.png'))
+        X_code_pose = None
+        for lb in lb_for_dim_reduction:
+            idx_for_this_lb = [i for i in range(len(self.train_label_list)) if self.train_label_list[i] == lb]
+            pose_code_for_this_lb = train_code_pose_all[idx_for_this_lb,:]
+            if X_code_pose is None:
+                X_code_pose = pose_code_for_this_lb
+            else:
+                X_code_pose = np.concatenate((X_code_pose, pose_code_for_this_lb), axis=0)
+        X_code_pose_emb_TSNE30_1000 = dim_reduction(X_code_pose, 'TSNE', 2, 30, 1000)
+        plot_emb_results(_emb=X_code_pose_emb_TSNE30_1000,
+                         _labels=Y_code,
+                         considered_lb=considered_lb,
+                         all_labels=sorted(self.all_train_labels),
+                         n_shot=0,
+                         n_aug=0,
+                         title='appearance codes',
+                         save_path=os.path.join(self.result_path, self.model_name, 'pose_code.png'))
+
         if self.val_path is None:
             self.saver_hal_pro.save(self.sess,
                                     os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
@@ -1620,6 +1684,14 @@ class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
                         self.lambda_consistency_pose * self.loss_pose_code_recon + \
                         self.lambda_intra * self.loss_intra + \
                         self.lambda_gan * self.loss_g
+        
+        ### Data flow to extract class codes and pose codes for visualization
+        self.train_feat = tf.placeholder(tf.float32, shape=[None, self.fc_dim], name='train_feat')
+        if self.with_pro:
+            self.train_code_class = self.proto_encoder(self.train_feat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True)
+        else:
+            self.train_code_class = self.train_feat
+        self.train_code_pose = self.encoder_pose(self.train_feat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True)
         
         ### variables
         self.all_vars = tf.global_variables()
