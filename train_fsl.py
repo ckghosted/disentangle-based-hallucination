@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import numpy as np
-from model_fsl import FSL
+from model_fsl import FSL, MSL, MSL_PN
 from model_fsl import FSL_PN_GAN, FSL_PN_GAN2
 from model_fsl import FSL_PN_AFHN
 from model_fsl import FSL_PN_PoseRef, FSL_PN_PoseRef_Before
@@ -57,6 +57,8 @@ def main():
     parser.add_argument('--GAN2', action='store_true', help='Use GAN-based hallucinator (with one more layer in the hallucinator) if present')
     parser.add_argument('--PoseRef', action='store_true', help='Use PoseRef-based hallucinator if present')
     parser.add_argument('--AFHN', action='store_true', help='Use AFHN-based hallucinator if present')
+    parser.add_argument('--MSL', action='store_true', help='Train MSL (many-shot learning) classifier using features if present')
+    parser.add_argument('--MSL_PN', action='store_true', help='Train MSL (many-shot learning) classifier using class codes if present')
     parser.add_argument('--z_dim', default=100, type=int, help='Dimension of the input noise to the GAN-based hallucinator')
     parser.add_argument('--z_std', default=1.0, type=float, help='Standard deviation of the input noise to the GAN-based hallucinator')
     parser.add_argument('--gpu_frac', default=0.5, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
@@ -169,6 +171,23 @@ def train(args):
                                      with_pro=args.with_pro,
                                      use_canonical_gallery=args.use_canonical_gallery,
                                      n_clusters_per_class=args.n_clusters_per_class)
+        elif args.MSL:
+            net = MSL(sess,
+                      model_name=args.model_name,
+                      result_path=os.path.join(args.result_path, args.hallucinator_name),
+                      fc_dim=args.fc_dim,
+                      n_class=args.n_class,
+                      n_base_class=args.n_base_class,
+                      l2scale=args.l2scale)
+        elif args.MSL_PN:
+            net = MSL_PN(sess,
+                         model_name=args.model_name,
+                         result_path=os.path.join(args.result_path, args.hallucinator_name),
+                         fc_dim=args.fc_dim,
+                         n_class=args.n_class,
+                         n_base_class=args.n_base_class,
+                         l2scale=args.l2scale,
+                         with_BN=args.with_BN)
         else:
             net = FSL(sess,
                       model_name=args.model_name,
@@ -320,6 +339,23 @@ def inference(args):
                                             with_pro=args.with_pro,
                                             use_canonical_gallery=args.use_canonical_gallery,
                                             n_clusters_per_class=args.n_clusters_per_class)
+        elif args.MSL:
+            net = MSL(sess,
+                      model_name=args.model_name,
+                      result_path=os.path.join(args.result_path, args.hallucinator_name),
+                      fc_dim=args.fc_dim,
+                      n_class=args.n_class,
+                      n_base_class=args.n_base_class,
+                      l2scale=args.l2scale)
+        elif args.MSL_PN:
+            net = MSL_PN(sess,
+                         model_name=args.model_name,
+                         result_path=os.path.join(args.result_path, args.hallucinator_name),
+                         fc_dim=args.fc_dim,
+                         n_class=args.n_class,
+                         n_base_class=args.n_base_class,
+                         l2scale=args.l2scale,
+                         with_BN=args.with_BN)
         else:
             net = FSL(sess,
                       model_name=args.model_name,
@@ -549,6 +585,7 @@ def visualize(args):
                      save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'hal_vis_embedded.png'))
     ## (6) Find the closest real feature (and the corresponding image) for each hallucinated feature
     if len(training_results) > 6:
+        corresponding_lb_poseRef_dict = {}
         for lb_idx in range(5):
             considered_lb = lb_for_dim_reduction[lb_idx]
             considered_feat_seed = final_novel_feat_dict[considered_lb][:args.n_shot,:]
@@ -649,6 +686,7 @@ def visualize(args):
             subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + corresponding_lb_poseRef + corresponding_lb_hal + corresponding_lb_hal_class + corresponding_lb_hal_pose
             fig = plot(img_array, 5, n_hal_plot, x_dim=x_dim, subtitles=subtitle_list, fontsize=10)
             plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
+            corresponding_lb_poseRef_dict[considered_lb] = corresponding_lb_poseRef
     else:
         for lb_idx in range(5):
             considered_lb = lb_for_dim_reduction[lb_idx]
@@ -740,6 +778,66 @@ def visualize(args):
                          n_aug=0,
                          title='appearance codes',
                          save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'pose_code.png'))
+    ## (8) Visualize logits of hallucinated features using the linear classifier trained on real (base + novel) features with many shots per class
+    # tf.reset_default_graph()
+    # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
+    # with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+    #     net = MSL(sess,
+    #               model_name='_MSL_extPT_lr3e3_ite_0',
+    #               result_path=os.path.join(args.result_path, args.hallucinator_name), # not important if we only call net.get_hal_logits() with gen_from correctly specified
+    #               fc_dim=args.fc_dim,
+    #               n_class=args.n_class,
+    #               n_base_class=args.n_base_class,
+    #               l2scale=args.l2scale)
+    #     net.build_model()
+    #     hal_logits_dict = net.get_hal_logits(final_novel_feat_dict=final_novel_feat_dict,
+    #                                          n_shot=args.n_shot,
+    #                                          n_aug=args.n_aug,
+    #                                          gen_from=os.path.join(args.result_path, 'msl', '_MSL_extPT_lr3e3_ite_0', 'models'))
+    #     print('hal_logits_dict.keys():', hal_logits_dict.keys())
+    #     all_classes = sorted(set(labels_all_train))
+    #     is_all = np.array([(i in all_classes) for i in range(args.n_class)], dtype=int)
+    #     for lb in lb_for_dim_reduction:
+    #         hal_logits = hal_logits_dict[lb]
+    #         score = np.exp(hal_logits) / np.repeat(np.sum(np.exp(hal_logits), axis=1, keepdims=True), repeats=args.n_class, axis=1)
+    #         score_all = score * is_all
+    #         best_n = np.argsort(score_all, axis=1)[:,-args.n_top:]
+    #         # print('for label %d, best_n.shape: %s' % (lb, best_n.shape))
+    #         print('for label %d, the top %d scores of the first %d hallucinated features are:' % (lb, args.n_top, n_hal_plot))
+    #         for idx in range(n_hal_plot):
+    #             print('hal %d (poseRef label: %s), ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
+    #             print(best_n[idx, :])
+    ## (9) Visualize logits of hallucinated features using the linear classifier (and a prototypical network)
+    ##     trained on real (base + novel) features with many shots per class
+    # tf.reset_default_graph()
+    # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
+    # with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+    #     net = MSL_PN(sess,
+    #                  model_name='_MSL_PN_extPT_lr3e3_ite_0',
+    #                  result_path=os.path.join(args.result_path, args.hallucinator_name), # not important if we only call net.get_hal_logits() with gen_from correctly specified
+    #                  fc_dim=args.fc_dim,
+    #                  n_class=args.n_class,
+    #                  n_base_class=args.n_base_class,
+    #                  l2scale=args.l2scale,
+    #                  with_BN=True)
+    #     net.build_model()
+    #     hal_logits_dict = net.get_hal_logits(final_novel_feat_dict=final_novel_feat_dict,
+    #                                          n_shot=args.n_shot,
+    #                                          n_aug=args.n_aug,
+    #                                          gen_from=os.path.join(args.result_path, 'HAL_PN_only_withBN_m20n5q40_ep15_extPT_lr1e4', '_MSL_PN_extPT_lr3e3_ite_0', 'models'))
+    #     print('hal_logits_dict.keys():', hal_logits_dict.keys())
+    #     all_classes = sorted(set(labels_all_train))
+    #     is_all = np.array([(i in all_classes) for i in range(args.n_class)], dtype=int)
+    #     for lb in lb_for_dim_reduction:
+    #         hal_logits = hal_logits_dict[lb]
+    #         score = np.exp(hal_logits) / np.repeat(np.sum(np.exp(hal_logits), axis=1, keepdims=True), repeats=args.n_class, axis=1)
+    #         score_all = score * is_all
+    #         best_n = np.argsort(score_all, axis=1)[:,-args.n_top:]
+    #         # print('for label %d, best_n.shape: %s' % (lb, best_n.shape))
+    #         print('for label %d, the top %d scores of the first %d hallucinated features are:' % (lb, args.n_top, n_hal_plot))
+    #         for idx in range(n_hal_plot):
+    #             print('hal %d (poseRef label: %s), ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
+    #             print(best_n[idx, :])
     
 if __name__ == '__main__':
     main()

@@ -66,7 +66,7 @@ class FSL(object):
         self.epsilon = epsilon
         self.l2scale = l2scale
         self.used_opt = used_opt
-    
+
     def build_model(self):
         ### model parameters
         self.features = tf.placeholder(tf.float32, shape=[None, self.fc_dim], name='features')
@@ -373,6 +373,351 @@ class FSL(object):
             print(" [*] Failed to find a checkpoint")
             return False, 0
 
+# Train the linear classifier using base-class and novel-class training features (both with many shots per class)
+class MSL(FSL):
+    def __init__(self,
+                 sess,
+                 model_name,
+                 result_path,
+                 fc_dim,
+                 n_class,
+                 n_base_class,
+                 bnDecay=0.9,
+                 epsilon=1e-5,
+                 l2scale=0.001,
+                 used_opt='adam'):
+        super(MSL, self).__init__(sess,
+                                  model_name,
+                                  result_path,
+                                  fc_dim,
+                                  n_class,
+                                  n_base_class,
+                                  bnDecay,
+                                  epsilon,
+                                  l2scale,
+                                  used_opt)
+    
+    def train(self,
+              train_novel_path, ## train_novel_feat path (must be specified!)
+              train_base_path, ## train_base_feat path (must be specified!)
+              hal_from, ## e.g., hal_name (must given)
+              hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
+              image_path=None,
+              label_key='image_labels',
+              n_shot=1,
+              n_aug=1, ## minimum number of samples per training class ==> (n_aug - n_shot) more samples need to be hallucinated
+              n_top=5, ## top-n accuracy
+              bsize=1000,
+              learning_rate=1e-4,
+              num_ite=10000,
+              novel_idx=None,
+              test_mode=False):
+        ### create a dedicated folder for this model
+        if os.path.exists(os.path.join(self.result_path, self.model_name)):
+            print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
+        else:
+            os.makedirs(os.path.join(self.result_path, self.model_name))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
+        
+        ### Load training features (as two dictionaries) from both base and novel classes
+        train_base_dict = unpickle(train_base_path)
+        n_feat_per_base = int(len(train_base_dict[label_key]) / len(set(train_base_dict[label_key])))
+        features_base_train = train_base_dict['features']
+        labels_base_train = [int(s) for s in train_base_dict[label_key]]
+        train_novel_dict = unpickle(train_novel_path)
+        features_novel_train = train_novel_dict['features']
+        labels_novel_train = [int(s) for s in train_novel_dict[label_key]]
+        all_novel_labels = sorted(set(labels_novel_train))
+        
+        features_novel_final = features_novel_train
+        labels_novel_final = labels_novel_train
+        print('features_novel_final.shape:', features_novel_final.shape)
+        print('len(labels_novel_final):', len(labels_novel_final))
+        print('features_base_train.shape:', features_base_train.shape)
+        print('len(labels_base_train):', len(labels_base_train))
+        
+        ### initialization
+        initOp = tf.global_variables_initializer()
+        self.sess.run(initOp)
+        
+        ### main training loop
+        n_used_classes = len(all_novel_labels) + self.n_base_class
+        n_base_per_batch = int(bsize * (self.n_base_class / n_used_classes))
+        n_novel_per_batch = bsize - n_base_per_batch
+        loss_train = []
+        acc_train = []
+        top_n_acc_train = []
+        loss_train_for_plot = []
+        acc_train_for_plot = []
+        for ite in range(num_ite):
+            batch_idx_base = np.random.choice(len(labels_base_train), n_base_per_batch, replace=False)
+            batch_idx_novel = np.random.choice(len(labels_novel_final), n_novel_per_batch, replace=True)
+            batch_features = np.concatenate((features_base_train[batch_idx_base], features_novel_final[batch_idx_novel]), axis=0)
+            batch_labels = np.array([labels_base_train[i] for i in batch_idx_base]+[labels_novel_final[i] for i in batch_idx_novel])
+            _, loss, logits = self.sess.run([self.opt_fsl_cls, self.loss, self.logits],
+                                            feed_dict={self.features: batch_features,
+                                                       self.labels: batch_labels,
+                                                       self.learning_rate: learning_rate})
+            loss_train.append(loss)
+            y_true = batch_labels
+            y_pred = np.argmax(logits, axis=1)
+            acc_train.append(accuracy_score(y_true, y_pred))
+            best_n = np.argsort(logits, axis=1)[:,-n_top:]
+            top_n_acc_train.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
+            if ite % (num_ite//20) == 0:
+                loss_train_for_plot.append(np.mean(loss_train[-(num_ite//20):]))
+                acc_train_for_plot.append(np.mean(acc_train[-(num_ite//20):]))
+                print('Ite: %d, train loss: %f, train accuracy: %f, top-%d train accuracy: %f' % \
+                      (ite, loss_train[-1], acc_train[-1], n_top, top_n_acc_train[-1]))
+        ## [20181025] We are not running validation during FSL training since it is meaningless.
+        ## Just save the final model
+        self.saver.save(self.sess,
+                        os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                        global_step=ite)
+        return [loss_train_for_plot, acc_train_for_plot]
+
+    def get_hal_logits(self,
+                       final_novel_feat_dict,
+                       n_shot,
+                       n_aug,
+                       gen_from=None, ## e.g., model_name (must given)
+                       gen_from_ckpt=None): ## e.g., model_name+'.model-1680' (can be None)
+        ### create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        
+        ### load previous model if possible
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            print(" [*] Load SUCCESS")
+            logits_dict = {}
+            all_novel_labels = sorted(final_novel_feat_dict.keys())
+            for lb in all_novel_labels:
+                hal_feat_array = final_novel_feat_dict[lb][n_shot:,:]
+                logits = self.sess.run(self.logits,
+                                       feed_dict={self.features: np.reshape(hal_feat_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_shot, self.fc_dim]
+                                                  self.bn_train: False})
+                print('logits.shape:', logits.shape)
+                logits_dict[lb] = logits
+
+            return logits_dict
+
+# Train the linear classifier using class codes (i.e., prototypical network embedded vectors)
+# of base-class and novel-class training features (both with many shots per class)
+class MSL_PN(FSL):
+    def __init__(self,
+                 sess,
+                 model_name,
+                 result_path,
+                 fc_dim,
+                 n_class,
+                 n_base_class,
+                 bnDecay=0.9,
+                 epsilon=1e-5,
+                 l2scale=0.001,
+                 used_opt='adam',
+                 with_BN=False):
+        super(MSL_PN, self).__init__(sess,
+                                     model_name,
+                                     result_path,
+                                     fc_dim,
+                                     n_class,
+                                     n_base_class,
+                                     bnDecay,
+                                     epsilon,
+                                     l2scale,
+                                     used_opt)
+        self.with_BN = with_BN
+    
+    def build_model(self):
+        ### model parameters
+        self.features = tf.placeholder(tf.float32, shape=[None, self.fc_dim], name='features')
+        self.labels = tf.placeholder(tf.int32, shape=[None], name='labels')
+        self.labels_vec = tf.one_hot(self.labels, self.n_class)
+        ### training parameters
+        self.bn_train = tf.placeholder('bool', name='bn_train')
+        self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
+        
+        ### data flow
+        self.features_encode = self.proto_encoder(self.features, bn_train=self.bn_train, with_BN=self.with_BN)
+        self.logits = self.fsl_classifier(self.features_encode)
+        
+        ### loss
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels_vec,
+                                                                           logits=self.logits,
+                                                                           name='loss'))
+        
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        # self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
+        ### variables and regularizers
+        self.all_vars = tf.global_variables()
+        self.all_vars_fsl_cls = [var for var in self.all_vars if 'fsl_cls' in var.name]
+        self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)] ### for loading the trained hallucinator and prototypical network
+        self.trainable_vars = tf.trainable_variables()
+        self.trainable_vars_fsl_cls = [var for var in self.trainable_vars if 'fsl_cls' in var.name]
+        self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        self.used_regs = [reg for reg in self.all_regs if \
+                          ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        self.used_regs_fsl_cls = [reg for reg in self.all_regs if \
+                                  ('fsl_cls' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
+        
+        ### optimizer
+        # with tf.control_dependencies(self.update_ops):
+        if self.used_opt == 'sgd':
+            self.opt_fsl_cls = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.loss+sum(self.used_regs_fsl_cls),
+                                                                                                            var_list=self.trainable_vars_fsl_cls)
+        elif self.used_opt == 'momentum':
+            self.opt_fsl_cls = tf.train.MomentumOptimizer(learning_rate=self.learning_rate,
+                                                          momentum=0.9).minimize(self.loss+sum(self.used_regs_fsl_cls),
+                                                                                 var_list=self.trainable_vars_fsl_cls)
+        elif self.used_opt == 'adam':
+            self.opt_fsl_cls = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                      beta1=0.5).minimize(self.loss+sum(self.used_regs_fsl_cls),
+                                                                          var_list=self.trainable_vars_fsl_cls)
+        
+        ### model saver (keep the best checkpoint)
+        self.saver = tf.train.Saver(max_to_keep=1)
+        ### model saver for loading the trained hallucinator and prototypical network
+        self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)
+
+        return [self.all_vars, self.trainable_vars, self.all_regs]
+    
+    def proto_encoder(self, x, bn_train, with_BN=False, reuse=False):
+        with tf.variable_scope('pro', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
+                x = batch_norm(x, is_train=bn_train)
+            x = tf.nn.relu(x, name='relu1')
+            x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
+            x = tf.nn.relu(x, name='relu2')
+        return x
+    
+    def train(self,
+              train_novel_path, ## train_novel_feat path (must be specified!)
+              train_base_path, ## train_base_feat path (must be specified!)
+              hal_from, ## e.g., hal_name (must given)
+              hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
+              image_path=None,
+              label_key='image_labels',
+              n_shot=1,
+              n_aug=1, ## minimum number of samples per training class ==> (n_aug - n_shot) more samples need to be hallucinated
+              n_top=5, ## top-n accuracy
+              bsize=1000,
+              learning_rate=1e-4,
+              num_ite=10000,
+              novel_idx=None,
+              test_mode=False):
+        ### create a dedicated folder for this model
+        if os.path.exists(os.path.join(self.result_path, self.model_name)):
+            print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
+        else:
+            os.makedirs(os.path.join(self.result_path, self.model_name))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
+        
+        ### Load training features (as two dictionaries) from both base and novel classes
+        train_base_dict = unpickle(train_base_path)
+        n_feat_per_base = int(len(train_base_dict[label_key]) / len(set(train_base_dict[label_key])))
+        features_base_train = train_base_dict['features']
+        labels_base_train = [int(s) for s in train_base_dict[label_key]]
+        train_novel_dict = unpickle(train_novel_path)
+        features_novel_train = train_novel_dict['features']
+        labels_novel_train = [int(s) for s in train_novel_dict[label_key]]
+        all_novel_labels = sorted(set(labels_novel_train))
+        
+        features_novel_final = features_novel_train
+        labels_novel_final = labels_novel_train
+        print('features_novel_final.shape:', features_novel_final.shape)
+        print('len(labels_novel_final):', len(labels_novel_final))
+        print('features_base_train.shape:', features_base_train.shape)
+        print('len(labels_base_train):', len(labels_base_train))
+        
+        ### initialization
+        initOp = tf.global_variables_initializer()
+        self.sess.run(initOp)
+
+        ## load previous trained proto_enc
+        could_load_hal_pro, checkpoint_counter_hal = self.load_hal_pro(hal_from, hal_from_ckpt)
+        
+        ### main training loop
+        n_used_classes = len(all_novel_labels) + self.n_base_class
+        n_base_per_batch = int(bsize * (self.n_base_class / n_used_classes))
+        n_novel_per_batch = bsize - n_base_per_batch
+        loss_train = []
+        acc_train = []
+        top_n_acc_train = []
+        loss_train_for_plot = []
+        acc_train_for_plot = []
+        for ite in range(num_ite):
+            batch_idx_base = np.random.choice(len(labels_base_train), n_base_per_batch, replace=False)
+            batch_idx_novel = np.random.choice(len(labels_novel_final), n_novel_per_batch, replace=True)
+            batch_features = np.concatenate((features_base_train[batch_idx_base], features_novel_final[batch_idx_novel]), axis=0)
+            batch_labels = np.array([labels_base_train[i] for i in batch_idx_base]+[labels_novel_final[i] for i in batch_idx_novel])
+            _, loss, logits = self.sess.run([self.opt_fsl_cls, self.loss, self.logits],
+                                            feed_dict={self.features: batch_features,
+                                                       self.labels: batch_labels,
+                                                       self.bn_train: False,
+                                                       self.learning_rate: learning_rate})
+            loss_train.append(loss)
+            y_true = batch_labels
+            y_pred = np.argmax(logits, axis=1)
+            acc_train.append(accuracy_score(y_true, y_pred))
+            best_n = np.argsort(logits, axis=1)[:,-n_top:]
+            top_n_acc_train.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
+            if ite % (num_ite//20) == 0:
+                loss_train_for_plot.append(np.mean(loss_train[-(num_ite//20):]))
+                acc_train_for_plot.append(np.mean(acc_train[-(num_ite//20):]))
+                print('Ite: %d, train loss: %f, train accuracy: %f, top-%d train accuracy: %f' % \
+                      (ite, loss_train[-1], acc_train[-1], n_top, top_n_acc_train[-1]))
+        ## [20181025] We are not running validation during FSL training since it is meaningless.
+        ## Just save the final model
+        self.saver.save(self.sess,
+                        os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                        global_step=ite)
+        return [loss_train_for_plot, acc_train_for_plot]
+
+    def get_hal_logits(self,
+                       final_novel_feat_dict,
+                       n_shot,
+                       n_aug,
+                       gen_from=None, ## e.g., model_name (must given)
+                       gen_from_ckpt=None): ## e.g., model_name+'.model-1680' (can be None)
+        ### create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        
+        ### load previous model if possible
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            print(" [*] Load SUCCESS")
+            logits_dict = {}
+            all_novel_labels = sorted(final_novel_feat_dict.keys())
+            for lb in all_novel_labels:
+                hal_feat_array = final_novel_feat_dict[lb][n_shot:,:]
+                logits = self.sess.run(self.logits,
+                                       feed_dict={self.features: np.reshape(hal_feat_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_shot, self.fc_dim]
+                                                  self.bn_train: False})
+                print('logits.shape:', logits.shape)
+                logits_dict[lb] = logits
+
+            return logits_dict
+
+    ## for loading the trained hallucinator and prototypical network
+    def load_hal_pro(self, init_from, init_from_ckpt=None):
+        ckpt = tf.train.get_checkpoint_state(init_from)
+        if ckpt and ckpt.model_checkpoint_path:
+            if init_from_ckpt is None:
+                ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            else:
+                ckpt_name = init_from_ckpt
+            self.saver_hal_pro.restore(self.sess, os.path.join(init_from, ckpt_name))
+            counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True, counter
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False, 0
+
 class FSL_PN_GAN(FSL):
     def __init__(self,
                  sess,
@@ -633,7 +978,7 @@ class FSL_PN_GAN(FSL):
             _, loss, logits = self.sess.run([self.opt_fsl_cls, self.loss, self.logits],
                                             feed_dict={self.features: batch_features,
                                                        self.labels: batch_labels,
-                                                       self.bn_train: True,
+                                                       self.bn_train: False,
                                                        self.learning_rate: learning_rate})
             loss_train.append(loss)
             y_true = batch_labels
