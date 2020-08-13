@@ -139,6 +139,212 @@ def plot_emb_results(_emb, # 2-dim feature
         plt.show()
     plt.close(fig)
 
+# use base-class data to train the prototypical network only without any hallucination
+class HAL_PN_only(object):
+    def __init__(self,
+                 sess,
+                 model_name,
+                 result_path,
+                 train_path,
+                 label_key='image_labels',
+                 n_way=5, ## number of classes in the support set
+                 n_shot=2, ## number of samples per class in the support set
+                 n_query_all=3, ## number of samples in the query set
+                 fc_dim=512,
+                 l2scale=0.001,
+                 n_train_class=64,
+                 with_BN=False,
+                 # with_pro=False, # Must use prototypical network!
+                 bnDecay=0.9,
+                 epsilon=1e-5,
+                 num_parallel_calls=4):
+        self.sess = sess
+        self.model_name = model_name
+        self.result_path = result_path
+        if not os.path.exists(self.result_path):
+            os.makedirs(self.result_path)
+        self.n_way = n_way
+        self.n_shot = n_shot
+        self.n_query_all = n_query_all
+        self.fc_dim = fc_dim
+        self.l2scale = l2scale
+        self.n_train_class = n_train_class
+        self.with_BN = with_BN
+        # self.with_pro = with_pro
+        self.bnDecay = bnDecay
+        self.epsilon = epsilon
+        self.num_parallel_calls = num_parallel_calls
+        
+        ### prepare datasets
+        self.train_path = train_path
+        self.label_key = label_key
+        self.train_base_dict = unpickle(self.train_path)
+        self.train_feat_list = self.train_base_dict['features']
+        self.train_fname_list = self.train_base_dict['image_names']
+        #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
+        #### such that all labels become in the range {0, 1, ..., self.n_train_class-1}
+        self.train_class_list_raw = self.train_base_dict[self.label_key]
+        all_train_class = sorted(set(self.train_class_list_raw))
+        print('original train class labeling:')
+        print(all_train_class)
+        label_mapping = {}
+        for new_lb in range(self.n_train_class):
+            label_mapping[all_train_class[new_lb]] = new_lb
+        self.train_label_list = np.array([label_mapping[old_lb] for old_lb in self.train_class_list_raw])
+        print('new train class labeling:')
+        print(sorted(set(self.train_label_list)))
+        
+        ### [2020/03/21] make candidate indexes for each label
+        self.candidate_indexes_each_lb_train = {}
+        for lb in range(self.n_train_class):
+            self.candidate_indexes_each_lb_train[lb] = [idx for idx in range(len(self.train_label_list)) if self.train_label_list[idx] == lb]
+        self.all_train_labels = set(self.train_label_list)
+    
+    def build_model(self):
+        ### training parameters
+        self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
+        self.bn_train_hal = tf.placeholder('bool', name='bn_train_hal')
+        
+        ### (1) episodic training
+        ### dataset
+        self.support_features = tf.placeholder(tf.float32, shape=[self.n_way, self.n_shot, self.fc_dim], name='support_features')
+        self.query_features = tf.placeholder(tf.float32, shape=[self.n_query_all, self.fc_dim], name='query_features')
+        self.query_labels = tf.placeholder(tf.int32, shape=[self.n_query_all], name='query_labels')
+        # self.support_labels = tf.placeholder(tf.int32, shape=[self.n_way], name='support_labels')
+        # self.support_classes = tf.placeholder(tf.int32, shape=[self.n_way], name='support_classes')
+
+        ### basic operation
+        self.support_feat_flat = tf.reshape(self.support_features, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_shot, self.fc_dim]
+        self.query_labels_vec = tf.one_hot(self.query_labels, self.n_way)
+        ### prototypical network encoding
+        self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
+        self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
+        ### prototypical network data flow using the original support set
+        self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
+        self.support_prototypes = tf.reduce_mean(self.support_encode, axis=1) ### shape: [self.n_way, self.fc_dim]
+        self.query_tile = tf.reshape(tf.tile(self.query_class_code, multiples=[1, self.n_way]), [self.n_query_all, self.n_way, -1]) #### shape: [self.n_query_all, self.n_way, self.fc_dim]
+        self.logits_pro = -tf.norm(self.support_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
+        self.loss_pro = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.query_labels_vec,
+                                                                                   logits=self.logits_pro,
+                                                                                   name='loss_pro'))
+        self.acc_pro = tf.nn.in_top_k(self.logits_pro, self.query_labels, k=1)
+
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        
+        ### variables
+        self.all_vars = tf.global_variables()
+        self.all_vars_pro = [var for var in self.all_vars if 'pro' in var.name]
+        ### trainable variables
+        self.trainable_vars = tf.trainable_variables()
+        ### regularizers
+        self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        self.used_regs = [reg for reg in self.all_regs if \
+                          ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        
+        ### optimizer
+        with tf.control_dependencies(self.update_ops):
+            self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                              beta1=0.5).minimize(self.loss_pro+sum(self.used_regs),
+                                                                  var_list=self.trainable_vars)
+        
+        ### model saver (keep the best checkpoint)
+        self.saver_pro = tf.train.Saver(var_list=self.all_vars_pro, max_to_keep=1)
+
+        ### Count number of trainable variables
+        total_params = 0
+        for var in self.trainable_vars:
+            shape = var.get_shape()
+            var_params = 1
+            for dim in shape:
+                var_params *= dim.value
+            total_params += var_params
+        print('total number of parameters: %d' % total_params)
+        
+        return [self.all_vars, self.trainable_vars, self.all_regs]
+    
+    ## "For PN, the embedding architecture consists of two MLP layers with ReLU as the activation function." (Y-X Wang, 2018)
+    def proto_encoder(self, x, bn_train, with_BN=True, reuse=False):
+        with tf.variable_scope('pro', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
+            x = linear(x, self.fc_dim, add_bias=(~with_BN), name='dense1') ## [-1,self.fc_dim]
+            if with_BN:
+                x = batch_norm(x, is_train=bn_train)
+            x = tf.nn.relu(x, name='relu1')
+            x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
+            x = tf.nn.relu(x, name='relu2')
+        return x
+    
+    def train(self,
+              image_path,
+              num_epoch=100,
+              n_ite_per_epoch=600,
+              lr_start=1e-5,
+              lr_decay=0.5,
+              lr_decay_step=20,
+              patience=10):
+        ### create a dedicated folder for this model
+        if os.path.exists(os.path.join(self.result_path, self.model_name)):
+            print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
+        else:
+            os.makedirs(os.path.join(self.result_path, self.model_name))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'samples'))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
+        
+        # op = self.sess.graph.get_operations()
+        # for m in op:
+        #     print(m.values())
+        ### initialization
+        initOp = tf.global_variables_initializer()
+        self.sess.run(initOp)
+        
+        ### episodic training
+        loss_train = []
+        acc_train = []
+        start_time = time.time()
+        for epoch in range(1, (num_epoch+1)):
+            lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
+            loss_ite_train = []
+            acc_ite_train = []
+            for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                ##### make episode
+                skip_this_episode = False
+                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                try:
+                    selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
+                                        for lb_idx in range(self.n_way)]
+                except:
+                    print('[Training] Skip this episode since there are not enough samples for some label')
+                    skip_this_episode = True
+                if skip_this_episode:
+                    continue
+                support_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx][0:self.n_shot]] for lb_idx in range(self.n_way)])
+                support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                query_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
+                query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
+                # support_labels = selected_lbs
+                # support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
+                _, loss, acc = self.sess.run([self.opt, self.loss_pro, self.acc_pro],
+                                             feed_dict={self.support_features: support_features,
+                                                        self.query_features: query_features,
+                                                        self.query_labels: query_labels,
+                                                        # self.support_labels: support_labels,
+                                                        # self.support_classes: support_classes,
+                                                        self.bn_train_hal: True,
+                                                        self.learning_rate: lr})
+                loss_ite_train.append(loss)
+                acc_ite_train.append(np.mean(acc))
+            loss_train.append(np.mean(loss_ite_train))
+            acc_train.append(np.mean(acc_ite_train))
+            print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
+                (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
+                
+        #### save model
+        self.saver_pro.save(self.sess,
+                            os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                            global_step=epoch)
+        print('time: %4.4f' % (time.time() - start_time))
+        return [loss_train, acc_train]
+
 class HAL_PN_GAN(object):
     def __init__(self,
                  sess,
@@ -619,6 +825,9 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.cos_sim_s1s2 = tf.reduce_sum(normalize_s_1 * normalize_s_2, axis=1)
         self.loss_anti_collapse = 1 / (tf.reduce_mean((1 - self.cos_sim_s1s2) / (1 - self.cos_sim_z1z2 + 1e-10)) + 1e-10)
 
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
         ### [2020/06/04] Follow AFHN (K. Li, CVPR 2020) to use a discriminator to make the hallucinated features (self.hal_feat) more realistic
         self.s_real = tf.reshape(self.support_ave, shape=[-1, self.fc_dim]) ### shape: [self.n_way, self.fc_dim]
         # self.feat_real_1 = tf.concat((self.s_real, self.z_1), axis=1) ### shape: [self.n_way, self.fc_dim+self.z_dim]
@@ -666,9 +875,9 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.loss_all = self.lambda_meta * self.loss_pro_aug + \
                         self.lambda_tf * self.loss_g_tf + \
                         self.lambda_ar * self.loss_anti_collapse
-
+        
         ### collect update operations for moving-means and moving-variances for batch normalizations
-        self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        self.update_ops_d = [op for op in tf.get_collection(tf.GraphKeys.UPDATE_OPS) if not op in self.update_ops]
         
         ### variables
         self.all_vars = tf.global_variables()
@@ -687,10 +896,11 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                               ('hal' in reg.name or 'pro' in reg.name) and (('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name))]
         
         ### optimizer
-        with tf.control_dependencies(self.update_ops):
+        with tf.control_dependencies(self.update_ops_d):
             self.opt_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
                                                 beta1=0.5).minimize(self.loss_d+sum(self.used_regs_d),
                                                                     var_list=self.trainable_vars_d)
+        with tf.control_dependencies(self.update_ops):
             self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
                                               beta1=0.5).minimize(self.loss_all+sum(self.used_regs_hal),
                                                                   var_list=self.trainable_vars_hal)

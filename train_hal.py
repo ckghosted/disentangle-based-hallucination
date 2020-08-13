@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import numpy as np
-from model_hal import HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_PoseRef, HAL_PN_PoseRef_Before
+from model_hal import HAL_PN_only, HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_PoseRef, HAL_PN_PoseRef_Before
 import os, re, glob
 
 import argparse
@@ -216,8 +216,23 @@ def train(args):
                                      d_per_g=args.d_per_g,
                                      n_gallery_per_class=args.n_gallery_per_class)
         else:
-            print('train_hal.py --> main() --> train(): use HAL_PN_baseline')
-            print('No HAL_PN_baseline for few-shot multiclass classification experiments!')
+            # print('train_hal.py --> main() --> train(): use HAL_PN_baseline')
+            # print('No HAL_PN_baseline for few-shot multiclass classification experiments!')
+            print('train_hal.py --> main() --> train(): use HAL_PN_only')
+            net = HAL_PN_only(sess,
+                              model_name=args.hallucinator_name,
+                              result_path=args.result_path,
+                              train_path=train_path,
+                              # val_path=val_path,
+                              label_key=args.label_key,
+                              n_way=args.n_way,
+                              n_shot=args.n_shot,
+                              n_query_all=args.n_query_all,
+                              fc_dim=args.fc_dim,
+                              l2scale=args.l2scale,
+                              n_train_class=args.n_train_class,
+                              with_BN=args.with_BN,
+                              num_parallel_calls=args.num_parallel_calls,)
         all_vars, trainable_vars, all_regs = net.build_model()
         # Debug: Check trainable variables and regularizers
         if args.debug:
