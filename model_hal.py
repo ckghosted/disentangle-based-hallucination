@@ -146,6 +146,7 @@ class HAL_PN_only(object):
                  model_name,
                  result_path,
                  train_path,
+                 val_path=None,
                  label_key='image_labels',
                  n_way=5, ## number of classes in the support set
                  n_shot=2, ## number of samples per class in the support set
@@ -199,6 +200,31 @@ class HAL_PN_only(object):
         for lb in range(self.n_train_class):
             self.candidate_indexes_each_lb_train[lb] = [idx for idx in range(len(self.train_label_list)) if self.train_label_list[idx] == lb]
         self.all_train_labels = set(self.train_label_list)
+
+        self.val_path = val_path
+        if not self.val_path is None:
+            self.val_base_dict = unpickle(self.val_path)
+            self.val_feat_list = self.val_base_dict['features']
+            self.val_fname_list = self.val_base_dict['image_names']
+            #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
+            #### such that all labels become in the range {0, 1, ..., self.n_val_class-1}
+            self.val_class_list_raw = self.val_base_dict[self.label_key]
+            all_val_class = sorted(set(self.val_class_list_raw))
+            print('original val class labeling:')
+            print(all_val_class)
+            label_mapping = {}
+            self.n_val_class = len(all_val_class)
+            for new_lb in range(self.n_val_class):
+                label_mapping[all_val_class[new_lb]] = new_lb
+            self.val_label_list = np.array([label_mapping[old_lb] for old_lb in self.val_class_list_raw])
+            print('new val class labeling:')
+            print(sorted(set(self.val_label_list)))
+            
+            ### [2020/03/21] make candidate indexes for each label
+            self.candidate_indexes_each_lb_val = {}
+            for lb in range(self.n_val_class):
+                self.candidate_indexes_each_lb_val[lb] = [idx for idx in range(len(self.val_label_list)) if self.val_label_list[idx] == lb]
+            self.all_val_labels = set(self.val_label_list)
     
     def build_model(self):
         ### training parameters
@@ -234,7 +260,7 @@ class HAL_PN_only(object):
         
         ### variables
         self.all_vars = tf.global_variables()
-        self.all_vars_pro = [var for var in self.all_vars if 'pro' in var.name]
+        self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
         ### trainable variables
         self.trainable_vars = tf.trainable_variables()
         ### regularizers
@@ -249,7 +275,7 @@ class HAL_PN_only(object):
                                                                   var_list=self.trainable_vars)
         
         ### model saver (keep the best checkpoint)
-        self.saver_pro = tf.train.Saver(var_list=self.all_vars_pro, max_to_keep=1)
+        self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)
 
         ### Count number of trainable variables
         total_params = 0
@@ -300,11 +326,16 @@ class HAL_PN_only(object):
         ### episodic training
         loss_train = []
         acc_train = []
+        loss_val = []
+        acc_val = []
         start_time = time.time()
+        best_val_loss = None
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
             acc_ite_train = []
+            loss_ite_val = []
+            acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
                 ##### make episode
                 skip_this_episode = False
@@ -333,17 +364,63 @@ class HAL_PN_only(object):
                                                         self.learning_rate: lr})
                 loss_ite_train.append(loss)
                 acc_ite_train.append(np.mean(acc))
+            
+            #### validation on val classes
+            if not self.val_path is None:
+                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                    ##### make episode
+                    skip_this_episode = False
+                    selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
+                    try:
+                        selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_val[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
+                                            for lb_idx in range(self.n_way)]
+                    except:
+                        print('[Validation] Skip this episode since there are not enough samples for some label')
+                        skip_this_episode = True
+                    if skip_this_episode:
+                        continue
+                    support_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][0:self.n_shot]] for lb_idx in range(self.n_way)])
+                    support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                    query_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
+                    query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
+                    # support_labels = selected_lbs
+                    # support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
+                    _, loss, acc = self.sess.run([self.opt, self.loss_pro, self.acc_pro],
+                                                 feed_dict={self.support_features: support_features,
+                                                            self.query_features: query_features,
+                                                            self.query_labels: query_labels,
+                                                            # self.support_labels: support_labels,
+                                                            # self.support_classes: support_classes,
+                                                            self.bn_train_hal: True,
+                                                            self.learning_rate: lr})
+                    loss_ite_val.append(loss)
+                    acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
-            print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
-                (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
-                
-        #### save model
-        self.saver_pro.save(self.sess,
-                            os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
-                            global_step=epoch)
+
+            if not self.val_path is None:
+                loss_val.append(np.mean(loss_ite_val))
+                acc_val.append(np.mean(acc_ite_val))
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, validation loss: %f, validation accuracy: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1], loss_val[-1], acc_val[-1]))
+                ### save model if improvement
+                if best_val_loss is None or loss_val[-1] < best_val_loss:
+                    best_val_loss = loss_val[-1]
+                    self.saver_hal_pro.save(self.sess,
+                                            os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                            global_step=epoch)
+            else:
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
+                    (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
         print('time: %4.4f' % (time.time() - start_time))
-        return [loss_train, acc_train]
+
+        if self.val_path is None:
+            self.saver_hal_pro.save(self.sess,
+                                    os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                    global_step=epoch)
+            return [loss_train, acc_train]
+        else:
+            return [loss_train, acc_train, loss_val, acc_val]
 
 class HAL_PN_GAN(object):
     def __init__(self,
@@ -351,6 +428,7 @@ class HAL_PN_GAN(object):
                  model_name,
                  result_path,
                  train_path,
+                 val_path=None,
                  label_key='image_labels',
                  n_way=5, ## number of classes in the support set
                  n_shot=2, ## number of samples per class in the support set
@@ -410,6 +488,31 @@ class HAL_PN_GAN(object):
         for lb in range(self.n_train_class):
             self.candidate_indexes_each_lb_train[lb] = [idx for idx in range(len(self.train_label_list)) if self.train_label_list[idx] == lb]
         self.all_train_labels = set(self.train_label_list)
+
+        self.val_path = val_path
+        if not self.val_path is None:
+            self.val_base_dict = unpickle(self.val_path)
+            self.val_feat_list = self.val_base_dict['features']
+            self.val_fname_list = self.val_base_dict['image_names']
+            #### Make a dictionary for {old_label: new_label} mapping, e.g., {1:0, 3:1, 4:2, 5:3, 8:4, ..., 250:158}
+            #### such that all labels become in the range {0, 1, ..., self.n_val_class-1}
+            self.val_class_list_raw = self.val_base_dict[self.label_key]
+            all_val_class = sorted(set(self.val_class_list_raw))
+            print('original val class labeling:')
+            print(all_val_class)
+            label_mapping = {}
+            self.n_val_class = len(all_val_class)
+            for new_lb in range(self.n_val_class):
+                label_mapping[all_val_class[new_lb]] = new_lb
+            self.val_label_list = np.array([label_mapping[old_lb] for old_lb in self.val_class_list_raw])
+            print('new val class labeling:')
+            print(sorted(set(self.val_label_list)))
+            
+            ### [2020/03/21] make candidate indexes for each label
+            self.candidate_indexes_each_lb_val = {}
+            for lb in range(self.n_val_class):
+                self.candidate_indexes_each_lb_val[lb] = [idx for idx in range(len(self.val_label_list)) if self.val_label_list[idx] == lb]
+            self.all_val_labels = set(self.val_label_list)
     
     def build_model(self):
         ### training parameters
@@ -561,12 +664,17 @@ class HAL_PN_GAN(object):
         ### episodic training
         loss_train = []
         acc_train = []
+        loss_val = []
+        acc_val = []
         start_time = time.time()
         n_ep_per_visualization = num_epoch//10 if num_epoch>10 else 1
+        best_val_loss = None
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
             acc_ite_train = []
+            loss_ite_val = []
+            acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
                 ##### make episode
                 skip_this_episode = False
@@ -623,18 +731,63 @@ class HAL_PN_GAN(object):
                         img_array[idx_way+m_support_considered,:] = img
                     fig = plot(img_array, 2, m_support_considered, x_dim=x_dim)
                     plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
-
+            
+            #### validation on val classes
+            if not self.val_path is None:
+                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                    ##### make episode
+                    skip_this_episode = False
+                    selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
+                    try:
+                        selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_val[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
+                                            for lb_idx in range(self.n_way)]
+                    except:
+                        print('[Validation] Skip this episode since there are not enough samples for some label')
+                        skip_this_episode = True
+                    if skip_this_episode:
+                        continue
+                    support_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][0:self.n_shot]] for lb_idx in range(self.n_way)])
+                    support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                    query_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
+                    query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
+                    support_labels = selected_lbs
+                    support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
+                    _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
+                                                 feed_dict={self.support_features: support_features,
+                                                            self.query_features: query_features,
+                                                            self.query_labels: query_labels,
+                                                            self.support_labels: support_labels,
+                                                            self.support_classes: support_classes,
+                                                            self.bn_train_hal: True,
+                                                            self.learning_rate: lr})
+                    loss_ite_val.append(loss)
+                    acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
-            print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
-                (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
-                
-        #### save model
-        self.saver_hal_pro.save(self.sess,
-                                os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
-                                global_step=epoch)
+            
+            if not self.val_path is None:
+                loss_val.append(np.mean(loss_ite_val))
+                acc_val.append(np.mean(acc_ite_val))
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, validation loss: %f, validation accuracy: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1], loss_val[-1], acc_val[-1]))
+                ### save model if improvement
+                if best_val_loss is None or loss_val[-1] < best_val_loss:
+                    best_val_loss = loss_val[-1]
+                    self.saver_hal_pro.save(self.sess,
+                                            os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                            global_step=epoch)
+            else:
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
+                    (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
         print('time: %4.4f' % (time.time() - start_time))
-        return [loss_train, acc_train]
+
+        if self.val_path is None:
+            self.saver_hal_pro.save(self.sess,
+                                    os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                    global_step=epoch)
+            return [loss_train, acc_train]
+        else:
+            return [loss_train, acc_train, loss_val, acc_val]
 
 class HAL_PN_GAN2(HAL_PN_GAN):
     def __init__(self,
@@ -642,6 +795,7 @@ class HAL_PN_GAN2(HAL_PN_GAN):
                  model_name,
                  result_path,
                  train_path,
+                 val_path=None,
                  label_key='image_labels',
                  n_way=5, ## number of classes in the support set
                  n_shot=2, ## number of samples per class in the support set
@@ -661,6 +815,7 @@ class HAL_PN_GAN2(HAL_PN_GAN):
                                           model_name,
                                           result_path,
                                           train_path,
+                                          val_path,
                                           label_key,
                                           n_way,
                                           n_shot,
@@ -701,6 +856,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                  model_name,
                  result_path,
                  train_path,
+                 val_path=None,
                  label_key='image_labels',
                  n_way=5, ## number of classes in the support set
                  n_shot=2, ## number of samples per class in the support set
@@ -725,6 +881,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                           model_name,
                                           result_path,
                                           train_path,
+                                          val_path,
                                           label_key,
                                           n_way,
                                           n_shot,
@@ -998,13 +1155,18 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         ### episodic training
         loss_train = []
         acc_train = []
+        loss_val = []
+        acc_val = []
         start_time = time.time()
         n_ep_per_visualization = num_epoch//10 if num_epoch>10 else 1
         cos_sim_h1h2_list = []
+        best_val_loss = None
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
             acc_ite_train = []
+            loss_ite_val = []
+            acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
                 if self.lambda_tf > 0:
                     for i_d_update in range(self.d_per_g):
@@ -1080,23 +1242,67 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                         img_array[idx_way+m_support_considered,:] = img
                     fig = plot(img_array, 2, m_support_considered, x_dim=x_dim)
                     plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
-
+            
+            if not self.val_path is None:
+                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                    ##### make episode
+                    skip_this_episode = False
+                    selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
+                    try:
+                        selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_val[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
+                                            for lb_idx in range(self.n_way)]
+                    except:
+                        print('[Validation] Skip this episode since there are not enough samples for some label')
+                        skip_this_episode = True
+                    if skip_this_episode:
+                        continue
+                    support_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][0:self.n_shot]] for lb_idx in range(self.n_way)])
+                    support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                    query_features = np.concatenate([self.val_feat_list[selected_indexes[lb_idx][self.n_shot:]] for lb_idx in range(self.n_way)])
+                    query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
+                    support_labels = selected_lbs
+                    support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
+                    _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.hal_feat],
+                                                 feed_dict={self.support_features: support_features,
+                                                            self.query_features: query_features,
+                                                            self.query_labels: query_labels,
+                                                            self.support_labels: support_labels,
+                                                            self.support_classes: support_classes,
+                                                            self.bn_train_hal: True,
+                                                            self.learning_rate: lr})
+                    loss_ite_val.append(loss)
+                    acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
-            print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
-                (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
 
             ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
             hal_feat_test_normalized = self.sess.run(self.hal_feat_test_normalized,
                                                      feed_dict={self.bn_train_hal: False})
             cos_sim_h1h2_list.append(np.sum(hal_feat_test_normalized[0,:] * hal_feat_test_normalized[1,:]))
-                
-        #### save model
-        self.saver_hal_pro.save(self.sess,
-                                os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
-                                global_step=epoch)
+            
+            if not self.val_path is None:
+                loss_val.append(np.mean(loss_ite_val))
+                acc_val.append(np.mean(acc_ite_val))
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, validation loss: %f, validation accuracy: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1], loss_val[-1], acc_val[-1]))
+                ### save model if improvement
+                if best_val_loss is None or loss_val[-1] < best_val_loss:
+                    best_val_loss = loss_val[-1]
+                    self.saver_hal_pro.save(self.sess,
+                                            os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                            global_step=epoch)
+            else:
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
+                    (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
         print('time: %4.4f' % (time.time() - start_time))
-        return [loss_train, acc_train, cos_sim_h1h2_list]
+
+        if self.val_path is None:
+            self.saver_hal_pro.save(self.sess,
+                                    os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
+                                    global_step=epoch)
+            return [loss_train, acc_train, cos_sim_h1h2_list]
+        else:
+            return [loss_train, acc_train, loss_val, acc_val, cos_sim_h1h2_list]
 
 class HAL_PN_PoseRef(object):
     def __init__(self,
