@@ -879,6 +879,12 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         ### collect update operations for moving-means and moving-variances for batch normalizations
         self.update_ops_d = [op for op in tf.get_collection(tf.GraphKeys.UPDATE_OPS) if not op in self.update_ops]
         
+        ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
+        s_test = tf.random_uniform([1, 1, self.fc_dim], 0.0, 1.0, seed=1002)
+        self.hal_feat_test, self.z_test = self.build_augmentor_test(s_test, 1, 1, 3, reuse=True)
+        squared_h = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_test), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
+        self.hal_feat_test_normalized = self.hal_feat_test / (squared_h + 1e-10)
+
         ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
@@ -994,6 +1000,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         acc_train = []
         start_time = time.time()
         n_ep_per_visualization = num_epoch//10 if num_epoch>10 else 1
+        cos_sim_h1h2_list = []
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
@@ -1016,7 +1023,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                         support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
                         _ = self.sess.run(self.opt_d,
                                           feed_dict={self.support_features: support_features,
-                                                     self.bn_train_hal: False,
+                                                     self.bn_train_hal: True,
                                                      self.learning_rate: lr})
                 ##### make episode
                 skip_this_episode = False
@@ -1078,13 +1085,18 @@ class HAL_PN_AFHN(HAL_PN_GAN):
             acc_train.append(np.mean(acc_ite_train))
             print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
                 (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
+
+            ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
+            hal_feat_test_normalized = self.sess.run(self.hal_feat_test_normalized,
+                                                     feed_dict={self.bn_train_hal: False})
+            cos_sim_h1h2_list.append(np.sum(hal_feat_test_normalized[0,:] * hal_feat_test_normalized[1,:]))
                 
         #### save model
         self.saver_hal_pro.save(self.sess,
                                 os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
                                 global_step=epoch)
         print('time: %4.4f' % (time.time() - start_time))
-        return [loss_train, acc_train]
+        return [loss_train, acc_train, cos_sim_h1h2_list]
 
 class HAL_PN_PoseRef(object):
     def __init__(self,

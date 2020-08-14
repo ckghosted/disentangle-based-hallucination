@@ -298,7 +298,18 @@ def train(args):
         fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'learning_curve.jpg'),
                     bbox_inches='tight')
         plt.close(fig)
-
+    if args.AFHN:
+        cos_sim_h1h2_list = results[-1]
+        fig, ax = plt.subplots(1,1, figsize=(8,6))
+        ax.plot(range(1, len(cos_sim_h1h2_list)+1), cos_sim_h1h2_list, label='cos_sim_h1h2_list')
+        ax.set_xticks(np.arange(1, len(cos_sim_h1h2_list)+1))
+        ax.set_xlabel('Training epochs', fontsize=16)
+        ax.set_ylabel('Cosine similarity', fontsize=16)
+        ax.legend(fontsize=16)
+        plt.suptitle('Cosine similarity', fontsize=20)
+        fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'cos_sim_h1h2.jpg'),
+                    bbox_inches='tight')
+        plt.close(fig)
 
 
 if __name__ == '__main__':
