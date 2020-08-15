@@ -385,14 +385,14 @@ class HAL_PN_only(object):
                     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                     # support_labels = selected_lbs
                     # support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                    _, loss, acc = self.sess.run([self.opt, self.loss_pro, self.acc_pro],
-                                                 feed_dict={self.support_features: support_features,
-                                                            self.query_features: query_features,
-                                                            self.query_labels: query_labels,
-                                                            # self.support_labels: support_labels,
-                                                            # self.support_classes: support_classes,
-                                                            self.bn_train_hal: True,
-                                                            self.learning_rate: lr})
+                    loss, acc = self.sess.run([self.loss_pro, self.acc_pro],
+                                              feed_dict={self.support_features: support_features,
+                                                         self.query_features: query_features,
+                                                         self.query_labels: query_labels,
+                                                         # self.support_labels: support_labels,
+                                                         # self.support_classes: support_classes,
+                                                         self.bn_train_hal: True,
+                                                         self.learning_rate: lr})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
@@ -752,14 +752,14 @@ class HAL_PN_GAN(object):
                     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                     support_labels = selected_lbs
                     support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                    _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
-                                                 feed_dict={self.support_features: support_features,
-                                                            self.query_features: query_features,
-                                                            self.query_labels: query_labels,
-                                                            self.support_labels: support_labels,
-                                                            self.support_classes: support_classes,
-                                                            self.bn_train_hal: True,
-                                                            self.learning_rate: lr})
+                    loss, acc, x_tilde_i = self.sess.run([self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
+                                                         feed_dict={self.support_features: support_features,
+                                                                    self.query_features: query_features,
+                                                                    self.query_labels: query_labels,
+                                                                    self.support_labels: support_labels,
+                                                                    self.support_classes: support_classes,
+                                                                    self.bn_train_hal: True,
+                                                                    self.learning_rate: lr})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
@@ -1243,6 +1243,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                     fig = plot(img_array, 2, m_support_considered, x_dim=x_dim)
                     plt.savefig(os.path.join(self.result_path, self.model_name, 'samples_%03d.png' % epoch), bbox_inches='tight')
             
+            #### validation on val classes
             if not self.val_path is None:
                 for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
                     ##### make episode
@@ -1262,14 +1263,14 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                     support_labels = selected_lbs
                     support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                    _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.hal_feat],
-                                                 feed_dict={self.support_features: support_features,
-                                                            self.query_features: query_features,
-                                                            self.query_labels: query_labels,
-                                                            self.support_labels: support_labels,
-                                                            self.support_classes: support_classes,
-                                                            self.bn_train_hal: True,
-                                                            self.learning_rate: lr})
+                    loss, acc, x_tilde_i = self.sess.run([self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
+                                                         feed_dict={self.support_features: support_features,
+                                                                    self.query_features: query_features,
+                                                                    self.query_labels: query_labels,
+                                                                    self.support_labels: support_labels,
+                                                                    self.support_classes: support_classes,
+                                                                    self.bn_train_hal: True,
+                                                                    self.learning_rate: lr})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
