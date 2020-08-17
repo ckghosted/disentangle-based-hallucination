@@ -358,6 +358,32 @@ class FSL(object):
                                              acc_test_novel_only, n_top, top_n_acc_test_novel_only,
                                              acc_test_novel, n_top, top_n_acc_test_novel))
     
+    def get_hal_logits(self,
+                       final_novel_feat_dict,
+                       n_shot,
+                       n_aug,
+                       gen_from=None, ## e.g., model_name (must given)
+                       gen_from_ckpt=None): ## e.g., model_name+'.model-1680' (can be None)
+        ### create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        
+        ### load previous model if possible
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            print(" [*] Load SUCCESS")
+            logits_dict = {}
+            all_novel_labels = sorted(final_novel_feat_dict.keys())
+            for lb in all_novel_labels:
+                hal_feat_array = final_novel_feat_dict[lb][n_shot:,:]
+                logits = self.sess.run(self.logits,
+                                       feed_dict={self.features: np.reshape(hal_feat_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_shot, self.fc_dim]
+                                                  self.bn_train: False})
+                print('logits.shape:', logits.shape)
+                logits_dict[lb] = logits
+
+            return logits_dict
+
     def load(self, init_from, init_from_ckpt=None):
         ckpt = tf.train.get_checkpoint_state(init_from)
         if ckpt and ckpt.model_checkpoint_path:
@@ -475,32 +501,6 @@ class MSL(FSL):
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=ite)
         return [loss_train_for_plot, acc_train_for_plot]
-
-    def get_hal_logits(self,
-                       final_novel_feat_dict,
-                       n_shot,
-                       n_aug,
-                       gen_from=None, ## e.g., model_name (must given)
-                       gen_from_ckpt=None): ## e.g., model_name+'.model-1680' (can be None)
-        ### create output folder
-        if gen_from is None:
-            gen_from = os.path.join(self.result_path, self.model_name, 'models')
-        
-        ### load previous model if possible
-        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
-        if could_load:
-            print(" [*] Load SUCCESS")
-            logits_dict = {}
-            all_novel_labels = sorted(final_novel_feat_dict.keys())
-            for lb in all_novel_labels:
-                hal_feat_array = final_novel_feat_dict[lb][n_shot:,:]
-                logits = self.sess.run(self.logits,
-                                       feed_dict={self.features: np.reshape(hal_feat_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_shot, self.fc_dim]
-                                                  self.bn_train: False})
-                print('logits.shape:', logits.shape)
-                logits_dict[lb] = logits
-
-            return logits_dict
 
 # Train the linear classifier using class codes (i.e., prototypical network embedded vectors)
 # of base-class and novel-class training features (both with many shots per class)
@@ -675,32 +675,6 @@ class MSL_PN(FSL):
                         os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
                         global_step=ite)
         return [loss_train_for_plot, acc_train_for_plot]
-
-    def get_hal_logits(self,
-                       final_novel_feat_dict,
-                       n_shot,
-                       n_aug,
-                       gen_from=None, ## e.g., model_name (must given)
-                       gen_from_ckpt=None): ## e.g., model_name+'.model-1680' (can be None)
-        ### create output folder
-        if gen_from is None:
-            gen_from = os.path.join(self.result_path, self.model_name, 'models')
-        
-        ### load previous model if possible
-        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
-        if could_load:
-            print(" [*] Load SUCCESS")
-            logits_dict = {}
-            all_novel_labels = sorted(final_novel_feat_dict.keys())
-            for lb in all_novel_labels:
-                hal_feat_array = final_novel_feat_dict[lb][n_shot:,:]
-                logits = self.sess.run(self.logits,
-                                       feed_dict={self.features: np.reshape(hal_feat_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_shot, self.fc_dim]
-                                                  self.bn_train: False})
-                print('logits.shape:', logits.shape)
-                logits_dict[lb] = logits
-
-            return logits_dict
 
     ## for loading the trained hallucinator and prototypical network
     def load_hal_pro(self, init_from, init_from_ckpt=None):

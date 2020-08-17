@@ -32,6 +32,8 @@ import cv2
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 
+from scipy.stats import entropy
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--result_path', type=str, help='Path to save all results')
@@ -312,20 +314,6 @@ def inference(args):
                               with_pro=args.with_pro)
         elif args.PoseRef:
             if args.ave_before_encode:
-                net = FSL_PN_PoseRef(sess,
-                                     model_name=args.model_name,
-                                     result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                     fc_dim=args.fc_dim,
-                                     n_class=args.n_class,
-                                     n_base_class=args.n_base_class,
-                                     l2scale=args.l2scale,
-                                     n_gallery_per_class=args.n_gallery_per_class,
-                                     n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                     with_BN=args.with_BN,
-                                     with_pro=args.with_pro,
-                                     use_canonical_gallery=args.use_canonical_gallery,
-                                     n_clusters_per_class=args.n_clusters_per_class)
-            else:
                 net = FSL_PN_PoseRef_Before(sess,
                                             model_name=args.model_name,
                                             result_path=os.path.join(args.result_path, args.hallucinator_name),
@@ -339,6 +327,20 @@ def inference(args):
                                             with_pro=args.with_pro,
                                             use_canonical_gallery=args.use_canonical_gallery,
                                             n_clusters_per_class=args.n_clusters_per_class)
+            else:
+                net = FSL_PN_PoseRef(sess,
+                                     model_name=args.model_name,
+                                     result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                     fc_dim=args.fc_dim,
+                                     n_class=args.n_class,
+                                     n_base_class=args.n_base_class,
+                                     l2scale=args.l2scale,
+                                     n_gallery_per_class=args.n_gallery_per_class,
+                                     n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     use_canonical_gallery=args.use_canonical_gallery,
+                                     n_clusters_per_class=args.n_clusters_per_class)
         elif args.MSL:
             net = MSL(sess,
                       model_name=args.model_name,
@@ -853,6 +855,106 @@ def visualize(args):
     #         for idx in range(n_hal_plot):
     #             print('hal %d (poseRef label: %s), ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
     #             print(best_n[idx, :])
+
+    ## (10) Print logits of hal features using the current linear_cls (and proto_enc)
+    if args.GAN or args.GAN2 or args.AFHN or args.PoseRef:
+        tf.reset_default_graph()
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
+        with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+            if args.GAN:
+                net = FSL_PN_GAN(sess,
+                                 model_name=args.model_name,
+                                 result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                 fc_dim=args.fc_dim,
+                                 n_class=args.n_class,
+                                 n_base_class=args.n_base_class,
+                                 l2scale=args.l2scale,
+                                 z_dim=args.z_dim,
+                                 z_std=args.z_std,
+                                 with_BN=args.with_BN,
+                                 with_pro=args.with_pro)
+            elif args.GAN2:
+                net = FSL_PN_GAN2(sess,
+                                  model_name=args.model_name,
+                                  result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                  fc_dim=args.fc_dim,
+                                  n_class=args.n_class,
+                                  n_base_class=args.n_base_class,
+                                  l2scale=args.l2scale,
+                                  z_dim=args.z_dim,
+                                  z_std=args.z_std,
+                                  with_BN=args.with_BN,
+                                  with_pro=args.with_pro)
+            elif args.AFHN:
+                net = FSL_PN_AFHN(sess,
+                                  model_name=args.model_name,
+                                  result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                  fc_dim=args.fc_dim,
+                                  n_class=args.n_class,
+                                  n_base_class=args.n_base_class,
+                                  l2scale=args.l2scale,
+                                  z_dim=args.z_dim,
+                                  z_std=args.z_std,
+                                  with_BN=args.with_BN,
+                                  with_pro=args.with_pro)
+            elif args.PoseRef:
+                if args.ave_before_encode:
+                    net = FSL_PN_PoseRef_Before(sess,
+                                                model_name=args.model_name,
+                                                result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                                fc_dim=args.fc_dim,
+                                                n_class=args.n_class,
+                                                n_base_class=args.n_base_class,
+                                                l2scale=args.l2scale,
+                                                n_gallery_per_class=args.n_gallery_per_class,
+                                                n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                                with_BN=args.with_BN,
+                                                with_pro=args.with_pro,
+                                                use_canonical_gallery=args.use_canonical_gallery,
+                                                n_clusters_per_class=args.n_clusters_per_class)
+                else:
+                    net = FSL_PN_PoseRef(sess,
+                                         model_name=args.model_name,
+                                         result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                         fc_dim=args.fc_dim,
+                                         n_class=args.n_class,
+                                         n_base_class=args.n_base_class,
+                                         l2scale=args.l2scale,
+                                         n_gallery_per_class=args.n_gallery_per_class,
+                                         n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                         with_BN=args.with_BN,
+                                         with_pro=args.with_pro,
+                                         use_canonical_gallery=args.use_canonical_gallery,
+                                         n_clusters_per_class=args.n_clusters_per_class)
+            net.build_model()
+            hal_logits_dict = net.get_hal_logits(final_novel_feat_dict=final_novel_feat_dict,
+                                                 n_shot=args.n_shot,
+                                                 n_aug=args.n_aug,
+                                                 gen_from=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'models'))
+            print('hal_logits_dict.keys():', hal_logits_dict.keys())
+            all_classes = sorted(set(labels_all_train))
+            is_all = np.array([(i in all_classes) for i in range(args.n_class)], dtype=int)
+            for lb in lb_for_dim_reduction:
+                hal_logits = hal_logits_dict[lb]
+                score = np.exp(hal_logits) / np.repeat(np.sum(np.exp(hal_logits), axis=1, keepdims=True), repeats=args.n_class, axis=1)
+                score_all = score * is_all
+                # print('score_all.shape:', score_all.shape)
+                best_n = np.argsort(score_all, axis=1)[:,-args.n_top:]
+                # print('for label %d, best_n.shape: %s' % (lb, best_n.shape))
+                print('for label %d, the top %d scores of the first %d hallucinated features are:' % (lb, args.n_top, n_hal_plot))
+                if args.PoseRef:
+                    for idx in range(n_hal_plot):
+                        print('hal %d (poseRef label: %s): ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
+                        print(best_n[idx, :], end=', ')
+                        print('score entropy: %.4f' % entropy(list(score_all[idx,:])))
+                else:
+                    for idx in range(n_hal_plot):
+                        print('hal %d: ' % idx, end='')
+                        print(best_n[idx, :], end=', ')
+                        print('score entropy: %.4f' % entropy(list(score_all[idx,:])))
+                averaged_entropy = np.mean([entropy(list(score_all[i,:])) for i in range(score_all.shape[0])])
+                print('averaged_entropy:', averaged_entropy)
+                        
     
 if __name__ == '__main__':
     main()
