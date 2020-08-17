@@ -391,8 +391,7 @@ class HAL_PN_only(object):
                                                          self.query_labels: query_labels,
                                                          # self.support_labels: support_labels,
                                                          # self.support_classes: support_classes,
-                                                         self.bn_train_hal: True,
-                                                         self.learning_rate: lr})
+                                                         self.bn_train_hal: False})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
@@ -758,8 +757,7 @@ class HAL_PN_GAN(object):
                                                                     self.query_labels: query_labels,
                                                                     self.support_labels: support_labels,
                                                                     self.support_classes: support_classes,
-                                                                    self.bn_train_hal: True,
-                                                                    self.learning_rate: lr})
+                                                                    self.bn_train_hal: False})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
@@ -951,16 +949,6 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.loss_pro_aug = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=query_labels_repeat_vec,
                                                                                    logits=cos_sim_ab_exp,
                                                                                    name='loss_pro_aug'))
-        ### prototypical network data flow using the augmented support set
-        # self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
-        # self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
-        # self.support_aug_encode = tf.concat((self.support_encode, self.hal_encode), axis=1) ### shape: [self.n_way, self.n_aug, self.fc_dim]
-        # self.support_aug_prototypes = tf.reduce_mean(self.support_aug_encode, axis=1) ### shape: [self.n_way, self.fc_dim]
-        # self.logits_pro_aug = -tf.norm(self.support_aug_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
-        # self.loss_pro_aug = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.query_labels_vec,
-        #                                                                            logits=self.logits_pro_aug,
-        #                                                                            name='loss_pro_aug'))
-        # self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
         ### still use prototypical network data flow with the augmented support set to compute accuracy
         self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
         self.support_aug_encode = tf.concat((self.support_encode, self.hal_encode), axis=1) ### shape: [self.n_way, self.n_aug, self.fc_dim]
@@ -968,6 +956,18 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.query_tile = tf.reshape(tf.tile(self.query_class_code, multiples=[1, self.n_way]), [self.n_query_all, self.n_way, -1]) #### shape: [self.n_query_all, self.n_way, self.fc_dim]
         self.logits_pro_aug = -tf.norm(self.support_aug_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
         self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
+        
+        ### prototypical network data flow using the augmented support set
+        # self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
+        # self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        # self.support_aug_encode = tf.concat((self.support_encode, self.hal_encode), axis=1) ### shape: [self.n_way, self.n_aug, self.fc_dim]
+        # self.support_aug_prototypes = tf.reduce_mean(self.support_aug_encode, axis=1) ### shape: [self.n_way, self.fc_dim]
+        # self.query_tile = tf.reshape(tf.tile(self.query_class_code, multiples=[1, self.n_way]), [self.n_query_all, self.n_way, -1]) #### shape: [self.n_query_all, self.n_way, self.fc_dim]
+        # self.logits_pro_aug = -tf.norm(self.support_aug_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
+        # self.loss_pro_aug = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.query_labels_vec,
+        #                                                                            logits=self.logits_pro_aug,
+        #                                                                            name='loss_pro_aug'))
+        # self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
         
         ### Anti-collapse regularizer in AFHN (K. Li, CVPR 2020)
         squared_z_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_1), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
@@ -1269,8 +1269,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                                                     self.query_labels: query_labels,
                                                                     self.support_labels: support_labels,
                                                                     self.support_classes: support_classes,
-                                                                    self.bn_train_hal: True,
-                                                                    self.learning_rate: lr})
+                                                                    self.bn_train_hal: False})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
