@@ -442,7 +442,12 @@ class HAL_PN_GAN(object):
                  with_pro=False,
                  bnDecay=0.9,
                  epsilon=1e-5,
-                 num_parallel_calls=4):
+                 num_parallel_calls=4,
+                 lambda_meta=1.0,
+                 lambda_tf=0.0,
+                 lambda_ar=0.0,
+                 gp_scale=10.0,
+                 d_per_g=5):
         self.sess = sess
         self.model_name = model_name
         self.result_path = result_path
@@ -462,6 +467,11 @@ class HAL_PN_GAN(object):
         self.bnDecay = bnDecay
         self.epsilon = epsilon
         self.num_parallel_calls = num_parallel_calls
+        self.lambda_meta = lambda_meta
+        self.lambda_tf = lambda_tf
+        self.lambda_ar = lambda_ar
+        self.gp_scale = gp_scale
+        self.d_per_g = d_per_g
         
         ### prepare datasets
         self.train_path = train_path
@@ -530,7 +540,7 @@ class HAL_PN_GAN(object):
         self.support_feat_flat = tf.reshape(self.support_features, shape=[-1, self.fc_dim]) ### shape: [self.n_way*self.n_shot, self.fc_dim]
         self.query_labels_vec = tf.one_hot(self.query_labels, self.n_way)
         ### hallucination flow
-        self.hal_feat = self.build_augmentor(self.support_features, self.n_way, self.n_shot, self.n_aug) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
+        self.hal_feat, self.z_all = self.build_augmentor(self.support_features, self.n_way, self.n_shot, self.n_aug) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         self.hallucinated_features = tf.reshape(self.hal_feat, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
         if self.with_pro:
             self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
@@ -551,25 +561,128 @@ class HAL_PN_GAN(object):
                                                                                    logits=self.logits_pro_aug,
                                                                                    name='loss_pro_aug'))
         self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
+        
+        ### [2020/08/17] Use the first 2 hallucination of each class to compute the anti-collapse regularizer in AFHN (K. Li, CVPR 2020)
+        self.z_all_reshape = tf.reshape(self.z_all, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.z_dim]
+        self.z_1 = tf.reshape(tf.slice(self.z_all_reshape, begin=[0,0,0], size=[self.n_way, 1, self.z_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.z_dim]
+        self.z_2 = tf.reshape(tf.slice(self.z_all_reshape, begin=[0,1,0], size=[self.n_way, 1, self.z_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.z_dim]
+        self.hal_feat_reshape = tf.reshape(self.hal_feat, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        self.hal_feat_1 = tf.reshape(tf.slice(self.hal_feat_reshape, begin=[0,0,0], size=[self.n_way, 1, self.fc_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.fc_dim]
+        self.hal_feat_2 = tf.reshape(tf.slice(self.hal_feat_reshape, begin=[0,1,0], size=[self.n_way, 1, self.fc_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.fc_dim]
+        squared_z_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_1), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
+        normalize_z_1 = self.z_1 / (squared_z_1 + 1e-10)
+        squared_z_2 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_2), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
+        normalize_z_2 = self.z_2 / (squared_z_2 + 1e-10)
+        self.cos_sim_z1z2 = tf.reduce_sum(normalize_z_1 * normalize_z_2, axis=1)
+        squared_s_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_1), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
+        normalize_s_1 = self.hal_feat_1 / (squared_s_1 + 1e-10)
+        squared_s_2 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_2), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
+        normalize_s_2 = self.hal_feat_2 / (squared_s_2 + 1e-10)
+        self.cos_sim_s1s2 = tf.reduce_sum(normalize_s_1 * normalize_s_2, axis=1)
+        self.loss_anti_collapse = 1 / (tf.reduce_mean((1 - self.cos_sim_s1s2) / (1 - self.cos_sim_z1z2 + 1e-10)) + 1e-10)
 
         ### collect update operations for moving-means and moving-variances for batch normalizations
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         
+        ### [2020/08/17] Use the first 2 hallucination of each class to compute the discriminator loss in AFHN (K. Li, CVPR 2020)
+        self.support_ave = tf.reduce_mean(self.support_features, axis=1, keep_dims=True) ### shape: [self.n_way, 1, self.fc_dim]
+        self.s_real = tf.reshape(self.support_ave, shape=[-1, self.fc_dim]) ### shape: [self.n_way, self.fc_dim]
+        # self.feat_real_1 = tf.concat((self.s_real, self.z_1), axis=1) ### shape: [self.n_way, self.fc_dim+self.z_dim]
+        # self.feat_real_2 = tf.concat((self.s_real, self.z_2), axis=1) ### shape: [self.n_way, self.fc_dim+self.z_dim]
+        # self.feat_fake_1 = tf.concat((self.hal_feat_1, self.z_1), axis=1) ### shape: [self.n_way, self.fc_dim+self.z_dim]
+        # self.feat_fake_2 = tf.concat((self.hal_feat_2, self.z_2), axis=1) ### shape: [self.n_way, self.fc_dim+self.z_dim]
+        ### [2020/07/01] it is also very weird to include noise as the input to the discriminator
+        self.feat_real_1 = self.s_real ### shape: [self.n_way, self.fc_dim]
+        self.feat_real_2 = self.s_real ### shape: [self.n_way, self.fc_dim]
+        self.feat_fake_1 = self.hal_feat_1 ### shape: [self.n_way, self.fc_dim]
+        self.feat_fake_2 = self.hal_feat_2 ### shape: [self.n_way, self.fc_dim]
+        if self.with_pro:
+            self.d_logit_real_1 = self.discriminator_tf(self.proto_encoder(self.feat_real_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal)
+            self.d_logit_real_2 = self.discriminator_tf(self.proto_encoder(self.feat_real_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_fake_1 = self.discriminator_tf(self.proto_encoder(self.feat_fake_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_fake_2 = self.discriminator_tf(self.proto_encoder(self.feat_fake_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
+        else:
+            self.d_logit_real_1 = self.discriminator_tf(self.feat_real_1, bn_train=self.bn_train_hal)
+            self.d_logit_real_2 = self.discriminator_tf(self.feat_real_2, bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_fake_1 = self.discriminator_tf(self.feat_fake_1, bn_train=self.bn_train_hal, reuse=True)
+            self.d_logit_fake_2 = self.discriminator_tf(self.feat_fake_2, bn_train=self.bn_train_hal, reuse=True)
+        ### (WGAN loss)
+        self.loss_d_real = tf.reduce_mean(self.d_logit_real_1) + tf.reduce_mean(self.d_logit_real_2)
+        self.loss_d_fake = tf.reduce_mean(self.d_logit_fake_1) + tf.reduce_mean(self.d_logit_fake_2)
+        self.loss_d_tf = self.loss_d_fake - self.loss_d_real
+        self.loss_g_tf = (-1) * (tf.reduce_mean(self.d_logit_fake_1) + tf.reduce_mean(self.d_logit_fake_2))
+        epsilon_1 = tf.random_uniform([], 0.0, 1.0)
+        x_hat_1 = epsilon_1 * self.s_real + (1 - epsilon_1) * self.hal_feat_1
+        # d_hat_1 = self.discriminator_tf(tf.concat((x_hat_1, self.z_1), axis=1), self.bn_train_hal, reuse=True)
+        d_hat_1 = self.discriminator_tf(x_hat_1, self.bn_train_hal, reuse=True)
+        self.ddx_1 = tf.gradients(d_hat_1, x_hat_1)[0]
+        self.ddx_1 = tf.sqrt(tf.reduce_sum(tf.square(self.ddx_1), axis=1))
+        self.ddx_1 = tf.reduce_mean(tf.square(self.ddx_1 - 1.0) * self.gp_scale)
+        epsilon_2 = tf.random_uniform([], 0.0, 1.0)
+        x_hat_2 = epsilon_2 * self.s_real + (1 - epsilon_2) * self.hal_feat_2
+        # d_hat_2 = self.discriminator_tf(tf.concat((x_hat_2, self.z_2), axis=1), self.bn_train_hal, reuse=True)
+        d_hat_2 = self.discriminator_tf(x_hat_2, self.bn_train_hal, reuse=True)
+        self.ddx_2 = tf.gradients(d_hat_2, x_hat_2)[0]
+        self.ddx_2 = tf.sqrt(tf.reduce_sum(tf.square(self.ddx_2), axis=1))
+        self.ddx_2 = tf.reduce_mean(tf.square(self.ddx_2 - 1.0) * self.gp_scale)
+        self.loss_d_tf = self.loss_d_tf + self.ddx_1 + self.ddx_2
+        
+        ### combine all loss functions
+        self.loss_d = self.lambda_tf * self.loss_d_tf
+        self.loss_all = self.lambda_meta * self.loss_pro_aug + \
+                        self.lambda_tf * self.loss_g_tf + \
+                        self.lambda_ar * self.loss_anti_collapse
+        
+        ### collect update operations for moving-means and moving-variances for batch normalizations
+        self.update_ops_d = [op for op in tf.get_collection(tf.GraphKeys.UPDATE_OPS) if not op in self.update_ops]
+        
+        ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
+        s_test = tf.random_uniform([1, 1, self.fc_dim], 0.0, 1.0, seed=1002)
+        self.hal_feat_test, self.z_test = self.build_augmentor_test(s_test, 1, 1, 3, reuse=True)
+        squared_h = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_test), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
+        self.hal_feat_test_normalized = self.hal_feat_test / (squared_h + 1e-10)
+
         ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
         ### trainable variables
         self.trainable_vars = tf.trainable_variables()
+        self.trainable_vars_d = [var for var in self.trainable_vars if ('discriminator' in var.name)]
+        self.trainable_vars_hal = [var for var in self.trainable_vars if ('hal' in var.name or 'pro' in var.name)]
         ### regularizers
         self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         self.used_regs = [reg for reg in self.all_regs if \
                           ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        self.used_regs_d = [reg for reg in self.all_regs if \
+                            ('discriminator' in reg.name) and (('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name))]
+        self.used_regs_hal = [reg for reg in self.all_regs if \
+                              ('hal' in reg.name or 'pro' in reg.name) and (('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name))]
         
         ### optimizer
+        with tf.control_dependencies(self.update_ops_d):
+            self.opt_d = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                beta1=0.5).minimize(self.loss_d+sum(self.used_regs_d),
+                                                                    var_list=self.trainable_vars_d)
         with tf.control_dependencies(self.update_ops):
             self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
-                                              beta1=0.5).minimize(self.loss_pro_aug+sum(self.used_regs),
-                                                                  var_list=self.trainable_vars)
+                                              beta1=0.5).minimize(self.loss_all+sum(self.used_regs_hal),
+                                                                  var_list=self.trainable_vars_hal)
+
+        # [2020/08/17] old implementation before introducing AR regularizer and discriminator loss
+        # ### variables
+        # self.all_vars = tf.global_variables()
+        # self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
+        # ### trainable variables
+        # self.trainable_vars = tf.trainable_variables()
+        # ### regularizers
+        # self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        # self.used_regs = [reg for reg in self.all_regs if \
+        #                   ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]        
+        # ### optimizer
+        # with tf.control_dependencies(self.update_ops):
+        #     self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+        #                                       beta1=0.5).minimize(self.loss_pro_aug+sum(self.used_regs),
+        #                                                           var_list=self.trainable_vars)
         
         ### model saver (keep the best checkpoint)
         self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)
@@ -597,6 +710,19 @@ class HAL_PN_GAN(object):
             x = tf.nn.relu(x, name='relu2')
         return x
     
+    ## "The discriminator is also a twolayer MLP, with LeakyReLU as the activation function for the first layer
+    ##  and Sigmoid for the second layer. The dimension of the hidden layer is also 1024." (K. Li, 2020)
+    def discriminator_tf(self, x, bn_train, with_BN=False, reuse=False):
+        with tf.variable_scope('discriminator_tf', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
+            x = linear(x, 1024, add_bias=(~with_BN), name='dense1')
+            if with_BN:
+                x = batch_norm(x, is_train=bn_train)
+            x = lrelu(x, name='relu1', leak=0.01)
+            x = linear(x, 1, add_bias=True, name='dense2')
+            #### It's weird to add sigmoid activation function for WGAN.
+            # x = tf.nn.sigmoid(x, name='sigmoid1')
+            return x
+
     ## "For our hallucinator G, we use a three layer MLP with ReLU as the activation function." (Y-X Wang, 2018)
     ## Use linear_identity() that initializes network parameters with identity matrix
     def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
@@ -635,7 +761,31 @@ class HAL_PN_GAN(object):
         ### Make input matrix
         input_mat = tf.concat([sampled_support, input_z_vec], axis=1) #### shape: [n_way*(n_aug-n_shot), self.fc_dim+self.z_dim]
         hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
-        return hal_feat
+        return hal_feat, input_z_vec
+
+    ## "For each class, we use G to generate n_gen additional examples till there are exactly n_aug examples per class." (Y-X Wang, 2018)
+    def build_augmentor_test(self, support, n_way, n_shot, n_aug, reuse=False):
+        input_z_vec = tf.random_normal([n_way*(n_aug-n_shot), self.z_dim], stddev=self.z_std, seed=1002)
+        ### Randomly select (n_aug-n_shot) samples per class as seeds
+        ### [2019/12/18] Use tg.gather_nd() to collect randomly selected samples from support set
+        ### Ref: https://github.com/tensorflow/docs/blob/r1.4/site/en/api_docs/api_docs/python/tf/gather_nd.md
+        ### For N-way, we want something like: [[[0, idx_1], [0, idx_2], ..., [0, idx_a]],
+        ###                                     [[1, idx_1], [1, idx_2], ..., [1, idx_a]],
+        ###                                     ...,
+        ###                                     [[N-1, idx_1], [N-1, idx_2], ..., [N-1, idx_a]]],
+        ### where idx_1, idx_2, ..., idx_a are the sampled indexes for each class (each within the range {0, 1, ..., n_shot-1}),
+        ### and a=n_aug-n_shot is the number of additional samples we want for each class.
+        idxs_for_each_class = np.array([np.random.choice(n_shot, n_aug-n_shot) for label_b in range(n_way)]) ### E.g., for 3-way 2-shot with n_aug=4, sampled [[1, 1], [1, 0], [1, 1]]
+        idxs_for_each_class = idxs_for_each_class.reshape([n_way*(n_aug-n_shot), 1]) ### reshape into [[1], [1], [1], [0], [1], [1]] for later combination with repeated class indexes
+        repeated_class_id = np.expand_dims(np.repeat(np.arange(n_way), n_aug-n_shot), 1) ### E.g., for 3-way 2-shot with n_aug=4, we want [[0], [0], [1], [1], [2], [2]]
+        idxs_for_gathering = np.concatenate((repeated_class_id, idxs_for_each_class), axis=1).reshape([n_way, n_aug-n_shot, 2]) ### E.g., for 3-way 2-shot with n_aug=4, we want [[[0, 1], [0, 1]], [[1, 1], [1, 0]], [[2, 1], [2, 1]]]
+        idxs_for_gathering_tensor = tf.convert_to_tensor(idxs_for_gathering)
+        sampled_support = tf.gather_nd(support, idxs_for_gathering_tensor)
+        sampled_support = tf.reshape(sampled_support, shape=[-1, self.fc_dim]) ### shape: [n_way*(n_aug-n_shot), self.fc_dim]
+        ### Make input matrix
+        input_mat = tf.concat([sampled_support, input_z_vec], axis=1) #### shape: [n_way*(n_aug-n_shot), self.fc_dim+self.z_dim]
+        hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
+        return hal_feat, input_z_vec
     
     def train(self,
               image_path,
@@ -668,6 +818,7 @@ class HAL_PN_GAN(object):
         start_time = time.time()
         n_ep_per_visualization = num_epoch//10 if num_epoch>10 else 1
         best_val_loss = None
+        cos_sim_h1h2_list = []
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
@@ -675,6 +826,26 @@ class HAL_PN_GAN(object):
             loss_ite_val = []
             acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                # [2020/08/17]
+                if self.lambda_tf > 0:
+                    for i_d_update in range(self.d_per_g):
+                        ####### make support set only
+                        skip_this_episode = False
+                        selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                        try:
+                            selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
+                                                for lb_idx in range(self.n_way)]
+                        except:
+                            print('[Training] Skip this episode since there are not enough samples for some label')
+                            skip_this_episode = True
+                        if skip_this_episode:
+                            continue
+                        support_features = np.concatenate([self.train_feat_list[selected_indexes[lb_idx]] for lb_idx in range(self.n_way)])
+                        support_features = np.reshape(support_features, (self.n_way, self.n_shot, self.fc_dim))
+                        _ = self.sess.run(self.opt_d,
+                                          feed_dict={self.support_features: support_features,
+                                                     self.bn_train_hal: True,
+                                                     self.learning_rate: lr})
                 ##### make episode
                 skip_this_episode = False
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
@@ -763,6 +934,11 @@ class HAL_PN_GAN(object):
             loss_train.append(np.mean(loss_ite_train))
             acc_train.append(np.mean(acc_ite_train))
             
+            ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
+            hal_feat_test_normalized = self.sess.run(self.hal_feat_test_normalized,
+                                                     feed_dict={self.bn_train_hal: False})
+            cos_sim_h1h2_list.append(np.sum(hal_feat_test_normalized[0,:] * hal_feat_test_normalized[1,:]))
+
             if not self.val_path is None:
                 loss_val.append(np.mean(loss_ite_val))
                 acc_val.append(np.mean(acc_ite_val))
@@ -783,9 +959,9 @@ class HAL_PN_GAN(object):
             self.saver_hal_pro.save(self.sess,
                                     os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
                                     global_step=epoch)
-            return [loss_train, acc_train]
+            return [loss_train, acc_train, cos_sim_h1h2_list]
         else:
-            return [loss_train, acc_train, loss_val, acc_val]
+            return [loss_train, acc_train, loss_val, acc_val, cos_sim_h1h2_list]
 
 class HAL_PN_GAN2(HAL_PN_GAN):
     def __init__(self,
@@ -808,7 +984,12 @@ class HAL_PN_GAN2(HAL_PN_GAN):
                  with_pro=False,
                  bnDecay=0.9,
                  epsilon=1e-5,
-                 num_parallel_calls=4):
+                 num_parallel_calls=4,
+                 lambda_meta=1.0,
+                 lambda_tf=0.0,
+                 lambda_ar=0.0,
+                 gp_scale=10.0,
+                 d_per_g=5):
         super(HAL_PN_GAN2, self).__init__(sess,
                                           model_name,
                                           result_path,
@@ -828,7 +1009,12 @@ class HAL_PN_GAN2(HAL_PN_GAN):
                                           with_pro,
                                           bnDecay,
                                           epsilon,
-                                          num_parallel_calls)
+                                          num_parallel_calls,
+                                          lambda_meta,
+                                          lambda_tf,
+                                          lambda_ar,
+                                          gp_scale,
+                                          d_per_g)
     
     def hallucinator(self, x, bn_train, with_BN=True, reuse=False):
         with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):

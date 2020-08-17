@@ -112,7 +112,10 @@ def train(args):
                              n_train_class=args.n_train_class,
                              with_BN=args.with_BN,
                              with_pro=args.with_pro,
-                             num_parallel_calls=args.num_parallel_calls)
+                             num_parallel_calls=args.num_parallel_calls,
+                             lambda_meta=args.lambda_meta,
+                             lambda_tf=args.lambda_tf,
+                             lambda_ar=args.lambda_ar)
         elif args.GAN2:
             # HAL_PN_GAN2: adds one more layer to the hallucinator of HAL_PN_GAN
             print('train_hal.py --> main() --> train(): use HAL_PN_GAN2')
@@ -133,7 +136,10 @@ def train(args):
                               n_train_class=args.n_train_class,
                               with_BN=args.with_BN,
                               with_pro=args.with_pro,
-                              num_parallel_calls=args.num_parallel_calls)
+                              num_parallel_calls=args.num_parallel_calls,
+                              lambda_meta=args.lambda_meta,
+                              lambda_tf=args.lambda_tf,
+                              lambda_ar=args.lambda_ar)
         elif args.AFHN:
             print('train_hal.py --> main() --> train(): use HAL_PN_AFHN')
             net = HAL_PN_AFHN(sess,
@@ -301,7 +307,7 @@ def train(args):
         fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'learning_curve.jpg'),
                     bbox_inches='tight')
         plt.close(fig)
-    if args.AFHN:
+    if args.GAN or args.GAN2 or args.AFHN:
         cos_sim_h1h2_list = results[-1]
         fig, ax = plt.subplots(1,1, figsize=(8,6))
         ax.plot(range(1, len(cos_sim_h1h2_list)+1), cos_sim_h1h2_list, label='cos_sim_h1h2_list')
