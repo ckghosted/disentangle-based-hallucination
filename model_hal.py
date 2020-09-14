@@ -297,7 +297,7 @@ class HAL_PN_only(object):
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
-            x = tf.nn.relu(x, name='relu2')
+            # x = tf.nn.relu(x, name='relu2')
         return x
     
     def train(self,
@@ -561,6 +561,8 @@ class HAL_PN_GAN(object):
                                                                                    logits=self.logits_pro_aug,
                                                                                    name='loss_pro_aug'))
         self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
+        ### prototypical network loss for validation
+        self.loss_pro_aug_val = self.loss_pro_aug
         
         ### [2020/08/17] Use the first 2 hallucination of each class to compute the anti-collapse regularizer in AFHN (K. Li, CVPR 2020)
         self.z_all_reshape = tf.reshape(self.z_all, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.z_dim]
@@ -570,16 +572,16 @@ class HAL_PN_GAN(object):
         self.hal_feat_1 = tf.reshape(tf.slice(self.hal_feat_reshape, begin=[0,0,0], size=[self.n_way, 1, self.fc_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.fc_dim]
         self.hal_feat_2 = tf.reshape(tf.slice(self.hal_feat_reshape, begin=[0,1,0], size=[self.n_way, 1, self.fc_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.fc_dim]
         squared_z_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_1), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
-        normalize_z_1 = self.z_1 / (squared_z_1 + 1e-10)
+        normalize_z_1 = self.z_1 / (squared_z_1 + 1e-5)
         squared_z_2 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_2), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
-        normalize_z_2 = self.z_2 / (squared_z_2 + 1e-10)
+        normalize_z_2 = self.z_2 / (squared_z_2 + 1e-5)
         self.cos_sim_z1z2 = tf.reduce_sum(normalize_z_1 * normalize_z_2, axis=1)
         squared_s_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_1), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
-        normalize_s_1 = self.hal_feat_1 / (squared_s_1 + 1e-10)
+        normalize_s_1 = self.hal_feat_1 / (squared_s_1 + 1e-5)
         squared_s_2 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_2), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
-        normalize_s_2 = self.hal_feat_2 / (squared_s_2 + 1e-10)
+        normalize_s_2 = self.hal_feat_2 / (squared_s_2 + 1e-5)
         self.cos_sim_s1s2 = tf.reduce_sum(normalize_s_1 * normalize_s_2, axis=1)
-        self.loss_anti_collapse = 1 / (tf.reduce_mean((1 - self.cos_sim_s1s2) / (1 - self.cos_sim_z1z2 + 1e-10)) + 1e-10)
+        self.loss_anti_collapse = 1 / (tf.reduce_mean((1 - self.cos_sim_s1s2) / (1 - self.cos_sim_z1z2 + 1e-5)) + 1e-5)
 
         ### collect update operations for moving-means and moving-variances for batch normalizations
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -596,30 +598,27 @@ class HAL_PN_GAN(object):
         self.feat_real_2 = self.s_real ### shape: [self.n_way, self.fc_dim]
         self.feat_fake_1 = self.hal_feat_1 ### shape: [self.n_way, self.fc_dim]
         self.feat_fake_2 = self.hal_feat_2 ### shape: [self.n_way, self.fc_dim]
-        if self.with_pro:
-            self.d_logit_real_1 = self.discriminator_tf(self.proto_encoder(self.feat_real_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal)
-            self.d_logit_real_2 = self.discriminator_tf(self.proto_encoder(self.feat_real_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_1 = self.discriminator_tf(self.proto_encoder(self.feat_fake_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_2 = self.discriminator_tf(self.proto_encoder(self.feat_fake_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-        else:
-            self.d_logit_real_1 = self.discriminator_tf(self.feat_real_1, bn_train=self.bn_train_hal)
-            self.d_logit_real_2 = self.discriminator_tf(self.feat_real_2, bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_1 = self.discriminator_tf(self.feat_fake_1, bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_2 = self.discriminator_tf(self.feat_fake_2, bn_train=self.bn_train_hal, reuse=True)
+
+        ### [2020/08/18c] discriminate real/fake in the feature space (not in the class space)
+        self.d_logit_real_1 = self.discriminator_tf(self.feat_real_1, bn_train=self.bn_train_hal)
+        self.d_logit_real_2 = self.discriminator_tf(self.feat_real_2, bn_train=self.bn_train_hal, reuse=True)
+        self.d_logit_fake_1 = self.discriminator_tf(self.feat_fake_1, bn_train=self.bn_train_hal, reuse=True)
+        self.d_logit_fake_2 = self.discriminator_tf(self.feat_fake_2, bn_train=self.bn_train_hal, reuse=True)
+        
         ### (WGAN loss)
         self.loss_d_real = tf.reduce_mean(self.d_logit_real_1) + tf.reduce_mean(self.d_logit_real_2)
         self.loss_d_fake = tf.reduce_mean(self.d_logit_fake_1) + tf.reduce_mean(self.d_logit_fake_2)
         self.loss_d_tf = self.loss_d_fake - self.loss_d_real
         self.loss_g_tf = (-1) * (tf.reduce_mean(self.d_logit_fake_1) + tf.reduce_mean(self.d_logit_fake_2))
         epsilon_1 = tf.random_uniform([], 0.0, 1.0)
-        x_hat_1 = epsilon_1 * self.s_real + (1 - epsilon_1) * self.hal_feat_1
+        x_hat_1 = epsilon_1 * self.feat_real_1 + (1 - epsilon_1) * self.hal_feat_1
         # d_hat_1 = self.discriminator_tf(tf.concat((x_hat_1, self.z_1), axis=1), self.bn_train_hal, reuse=True)
         d_hat_1 = self.discriminator_tf(x_hat_1, self.bn_train_hal, reuse=True)
         self.ddx_1 = tf.gradients(d_hat_1, x_hat_1)[0]
         self.ddx_1 = tf.sqrt(tf.reduce_sum(tf.square(self.ddx_1), axis=1))
         self.ddx_1 = tf.reduce_mean(tf.square(self.ddx_1 - 1.0) * self.gp_scale)
         epsilon_2 = tf.random_uniform([], 0.0, 1.0)
-        x_hat_2 = epsilon_2 * self.s_real + (1 - epsilon_2) * self.hal_feat_2
+        x_hat_2 = epsilon_2 * self.feat_real_2 + (1 - epsilon_2) * self.hal_feat_2
         # d_hat_2 = self.discriminator_tf(tf.concat((x_hat_2, self.z_2), axis=1), self.bn_train_hal, reuse=True)
         d_hat_2 = self.discriminator_tf(x_hat_2, self.bn_train_hal, reuse=True)
         self.ddx_2 = tf.gradients(d_hat_2, x_hat_2)[0]
@@ -640,7 +639,7 @@ class HAL_PN_GAN(object):
         s_test = tf.random_uniform([1, 1, self.fc_dim], 0.0, 1.0, seed=1002)
         self.hal_feat_test, self.z_test = self.build_augmentor_test(s_test, 1, 1, 3, reuse=True)
         squared_h = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_test), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
-        self.hal_feat_test_normalized = self.hal_feat_test / (squared_h + 1e-10)
+        self.hal_feat_test_normalized = self.hal_feat_test / (squared_h + 1e-5)
 
         ### variables
         self.all_vars = tf.global_variables()
@@ -667,22 +666,6 @@ class HAL_PN_GAN(object):
             self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
                                               beta1=0.5).minimize(self.loss_all+sum(self.used_regs_hal),
                                                                   var_list=self.trainable_vars_hal)
-
-        # [2020/08/17] old implementation before introducing AR regularizer and discriminator loss
-        # ### variables
-        # self.all_vars = tf.global_variables()
-        # self.all_vars_hal_pro = [var for var in self.all_vars if ('hal' in var.name or 'pro' in var.name)]
-        # ### trainable variables
-        # self.trainable_vars = tf.trainable_variables()
-        # ### regularizers
-        # self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-        # self.used_regs = [reg for reg in self.all_regs if \
-        #                   ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]        
-        # ### optimizer
-        # with tf.control_dependencies(self.update_ops):
-        #     self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
-        #                                       beta1=0.5).minimize(self.loss_pro_aug+sum(self.used_regs),
-        #                                                           var_list=self.trainable_vars)
         
         ### model saver (keep the best checkpoint)
         self.saver_hal_pro = tf.train.Saver(var_list=self.all_vars_hal_pro, max_to_keep=1)
@@ -707,7 +690,7 @@ class HAL_PN_GAN(object):
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
-            x = tf.nn.relu(x, name='relu2')
+            # x = tf.nn.relu(x, name='relu2')
         return x
     
     ## "The discriminator is also a twolayer MLP, with LeakyReLU as the activation function for the first layer
@@ -812,26 +795,33 @@ class HAL_PN_GAN(object):
         
         ### episodic training
         loss_train = []
+        z1z2_train = []
+        s1s2_train = []
+        lossAR_train = []
         acc_train = []
         loss_val = []
         acc_val = []
         start_time = time.time()
         n_ep_per_visualization = num_epoch//10 if num_epoch>10 else 1
-        best_val_loss = None
         cos_sim_h1h2_list = []
+        best_val_loss = None
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
+            z1z2_ite_train = []
+            s1s2_ite_train = []
+            lossAR_ite_train = []
             acc_ite_train = []
             loss_ite_val = []
             acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
-                # [2020/08/17]
+                ### [2020/08/18a] Use the same set of classes during the training of discriminator and hallucinator in each episode
+                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 if self.lambda_tf > 0:
                     for i_d_update in range(self.d_per_g):
                         ####### make support set only
                         skip_this_episode = False
-                        selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                        # selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                         try:
                             selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
                                                 for lb_idx in range(self.n_way)]
@@ -848,7 +838,7 @@ class HAL_PN_GAN(object):
                                                      self.learning_rate: lr})
                 ##### make episode
                 skip_this_episode = False
-                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                # selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 try:
                     selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
                                         for lb_idx in range(self.n_way)]
@@ -863,7 +853,7 @@ class HAL_PN_GAN(object):
                 query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                 support_labels = selected_lbs
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
+                _, loss, acc, x_tilde_i, z1z2, s1s2, lossAR, h1, h2 = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.hal_feat, self.cos_sim_z1z2, self.cos_sim_s1s2, self.loss_anti_collapse, self.hal_feat_1, self.hal_feat_2],
                                              feed_dict={self.support_features: support_features,
                                                         self.query_features: query_features,
                                                         self.query_labels: query_labels,
@@ -872,8 +862,11 @@ class HAL_PN_GAN(object):
                                                         self.bn_train_hal: True,
                                                         self.learning_rate: lr})
                 loss_ite_train.append(loss)
+                z1z2_ite_train.append(z1z2)
+                s1s2_ite_train.append(s1s2)
+                lossAR_ite_train.append(lossAR)
                 acc_ite_train.append(np.mean(acc))
-                
+
                 ##### visualize nearest images
                 if epoch % n_ep_per_visualization == 0 and ite == n_ite_per_epoch:
                     m_support_considered = 5
@@ -922,7 +915,7 @@ class HAL_PN_GAN(object):
                     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                     support_labels = selected_lbs
                     support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                    loss, acc, x_tilde_i = self.sess.run([self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
+                    loss, acc, x_tilde_i = self.sess.run([self.loss_pro_aug_val, self.acc_pro_aug, self.hal_feat],
                                                          feed_dict={self.support_features: support_features,
                                                                     self.query_features: query_features,
                                                                     self.query_labels: query_labels,
@@ -932,13 +925,16 @@ class HAL_PN_GAN(object):
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
             loss_train.append(np.mean(loss_ite_train))
+            z1z2_train.append(np.mean(z1z2_ite_train))
+            s1s2_train.append(np.mean(s1s2_ite_train))
+            lossAR_train.append(np.mean(lossAR_ite_train))
             acc_train.append(np.mean(acc_ite_train))
-            
+
             ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
             hal_feat_test_normalized = self.sess.run(self.hal_feat_test_normalized,
                                                      feed_dict={self.bn_train_hal: False})
             cos_sim_h1h2_list.append(np.sum(hal_feat_test_normalized[0,:] * hal_feat_test_normalized[1,:]))
-
+            
             if not self.val_path is None:
                 loss_val.append(np.mean(loss_ite_val))
                 acc_val.append(np.mean(acc_ite_val))
@@ -951,8 +947,8 @@ class HAL_PN_GAN(object):
                                             os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
                                             global_step=epoch)
             else:
-                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
-                    (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, z1z2: %f, s1s2: %f, lossAR: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1], z1z2_train[-1], s1s2_train[-1], lossAR_train[-1]))
         print('time: %4.4f' % (time.time() - start_time))
 
         if self.val_path is None:
@@ -1080,12 +1076,12 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                           with_pro,
                                           bnDecay,
                                           epsilon,
-                                          num_parallel_calls)
-        self.lambda_meta = lambda_meta
-        self.lambda_tf = lambda_tf
-        self.lambda_ar = lambda_ar
-        self.gp_scale = gp_scale
-        self.d_per_g = d_per_g
+                                          num_parallel_calls,
+                                          lambda_meta,
+                                          lambda_tf,
+                                          lambda_ar,
+                                          gp_scale,
+                                          d_per_g)
     
     def build_model(self):
         ### training parameters
@@ -1106,12 +1102,13 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         ### hallucination flow
         self.support_ave = tf.reduce_mean(self.support_features, axis=1, keep_dims=True) ### shape: [self.n_way, 1, self.fc_dim]
         ### [NOTE] make 2 hallucination for each class in the support set
-        self.hal_feat_1, self.z_1 = self.build_augmentor(self.support_ave, self.n_way, self.n_shot, self.n_shot+1) ### shape: [self.n_way, self.fc_dim], [self.n_way, self.z_dim]
-        self.hallucinated_features_1 = tf.reshape(self.hal_feat_1, shape=[self.n_way, 1, -1]) ### shape: [self.n_way, 1, self.fc_dim]
-        self.hal_feat_2, self.z_2 = self.build_augmentor(self.support_ave, self.n_way, self.n_shot, self.n_shot+1, reuse=True) ### shape: [self.n_way, self.fc_dim], [self.n_way, self.z_dim]
-        self.hallucinated_features_2 = tf.reshape(self.hal_feat_2, shape=[self.n_way, 1, -1]) ### shape: [self.n_way, 1, self.fc_dim]
-        self.hallucinated_features = tf.concat((self.hallucinated_features_1, self.hallucinated_features_2), axis=1) ### shape: [self.n_way, 2, self.fc_dim]
-        self.hal_feat = tf.reshape(self.hallucinated_features, shape=[self.n_way*2, -1]) ### shape: [self.n_way*2, self.fc_dim]
+        # self.hal_feat_1, self.z_1 = self.build_augmentor(self.support_ave, self.n_way, self.n_shot, self.n_shot+1) ### shape: [self.n_way, self.fc_dim], [self.n_way, self.z_dim]
+        # self.hallucinated_features_1 = tf.reshape(self.hal_feat_1, shape=[self.n_way, 1, -1]) ### shape: [self.n_way, 1, self.fc_dim]
+        # self.hal_feat_2, self.z_2 = self.build_augmentor(self.support_ave, self.n_way, self.n_shot, self.n_shot+1, reuse=True) ### shape: [self.n_way, self.fc_dim], [self.n_way, self.z_dim]
+        # self.hallucinated_features_2 = tf.reshape(self.hal_feat_2, shape=[self.n_way, 1, -1]) ### shape: [self.n_way, 1, self.fc_dim]
+        # self.hallucinated_features = tf.concat((self.hallucinated_features_1, self.hallucinated_features_2), axis=1) ### shape: [self.n_way, 2, self.fc_dim]
+        # self.hal_feat = tf.reshape(self.hallucinated_features, shape=[self.n_way*2, -1]) ### shape: [self.n_way*2, self.fc_dim]
+        self.hal_feat, self.z_all = self.build_augmentor(self.support_ave, self.n_way, self.n_shot, self.n_aug) ### shape: [self.n_way*(self.n_aug-self.n_shot), self.fc_dim]
         if self.with_pro:
             self.support_class_code = self.proto_encoder(self.support_feat_flat, bn_train=self.bn_train_hal, with_BN=self.with_BN) #### shape: [self.n_way*self.n_shot, self.fc_dim]
             self.query_class_code = self.proto_encoder(self.query_features, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True) #### shape: [self.n_query_all, self.fc_dim]
@@ -1121,52 +1118,50 @@ class HAL_PN_AFHN(HAL_PN_GAN):
             self.query_class_code = self.query_features
             self.hal_class_code = self.hal_feat
         ### [2020/06/24] Follow AFHN (K. Li, CVPR 2020) to use cosine similarity between hallucinated and query features to compute classification error
-        self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, 2, -1]) ### shape: [self.n_way, 2, self.fc_dim]
+        self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
         squared_a = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_encode), axis=2, keep_dims=True)), multiples=[1, 1, self.fc_dim])
-        normalize_a = self.hal_encode / (squared_a + 1e-10)
-        normalize_a_tile = tf.tile(tf.transpose(normalize_a, perm=[1, 0, 2]), multiples=[self.n_query_all, 1, 1])
-        query_labels_repeat = tf.reshape(tf.tile(tf.expand_dims(self.query_labels, axis=1), multiples=[1, 2]), [-1])
+        normalize_a = self.hal_encode / (squared_a + 1e-5)
+        self.normalize_a_tile = tf.tile(tf.transpose(normalize_a, perm=[1, 0, 2]), multiples=[self.n_query_all, 1, 1])
+        query_labels_repeat = tf.reshape(tf.tile(tf.expand_dims(self.query_labels, axis=1), multiples=[1, self.n_aug-self.n_shot]), [-1])
         query_labels_repeat_vec = tf.one_hot(query_labels_repeat, self.n_way)
         squared_b = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.query_class_code), axis=1, keep_dims=True)), multiples=[1, self.fc_dim])
-        normalize_b = self.query_class_code / (squared_b + 1e-10)
-        normalize_b_repeat = tf.reshape(tf.tile(tf.expand_dims(normalize_b, axis=1), multiples=[1, self.n_way*2, 1]), [self.n_query_all*2, self.n_way, -1])
-        cos_sim_ab_exp = tf.exp(tf.reduce_sum(normalize_a_tile * normalize_b_repeat, axis=2))
-        p_y = cos_sim_ab_exp / (tf.reduce_sum(cos_sim_ab_exp, axis=1, keep_dims=True) + 1e-10)
+        normalize_b = self.query_class_code / (squared_b + 1e-5)
+        self.normalize_b_repeat = tf.reshape(tf.tile(tf.expand_dims(normalize_b, axis=1), multiples=[1, self.n_way*(self.n_aug-self.n_shot), 1]), [self.n_query_all*(self.n_aug-self.n_shot), self.n_way, -1])
+        # [2020/08/23] Follow (S. Gidaris, CVPR 2018) to introduce a scalar 10 to increase the peakiness of the probability distribution generated by the softmax operator
+        self.cos_sim_ab = 10 * tf.reduce_sum(self.normalize_a_tile * self.normalize_b_repeat, axis=2)
         self.loss_pro_aug = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=query_labels_repeat_vec,
-                                                                                   logits=cos_sim_ab_exp,
+                                                                                   logits=self.cos_sim_ab,
                                                                                    name='loss_pro_aug'))
-        ### still use prototypical network data flow with the augmented support set to compute accuracy
+        self.acc_pro_aug = tf.nn.in_top_k(self.cos_sim_ab, query_labels_repeat, k=1)
+        ### still use prototypical network data flow (with the augmented support set) to compute accuracy for validation episodes
         self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
         self.support_aug_encode = tf.concat((self.support_encode, self.hal_encode), axis=1) ### shape: [self.n_way, self.n_aug, self.fc_dim]
         self.support_aug_prototypes = tf.reduce_mean(self.support_aug_encode, axis=1) ### shape: [self.n_way, self.fc_dim]
         self.query_tile = tf.reshape(tf.tile(self.query_class_code, multiples=[1, self.n_way]), [self.n_query_all, self.n_way, -1]) #### shape: [self.n_query_all, self.n_way, self.fc_dim]
         self.logits_pro_aug = -tf.norm(self.support_aug_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
-        self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
-        
-        ### prototypical network data flow using the augmented support set
-        # self.support_encode = tf.reshape(self.support_class_code, shape=[self.n_way, self.n_shot, -1]) ### shape: [self.n_way, self.n_shot, self.fc_dim]
-        # self.hal_encode = tf.reshape(self.hal_class_code, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
-        # self.support_aug_encode = tf.concat((self.support_encode, self.hal_encode), axis=1) ### shape: [self.n_way, self.n_aug, self.fc_dim]
-        # self.support_aug_prototypes = tf.reduce_mean(self.support_aug_encode, axis=1) ### shape: [self.n_way, self.fc_dim]
-        # self.query_tile = tf.reshape(tf.tile(self.query_class_code, multiples=[1, self.n_way]), [self.n_query_all, self.n_way, -1]) #### shape: [self.n_query_all, self.n_way, self.fc_dim]
-        # self.logits_pro_aug = -tf.norm(self.support_aug_prototypes - self.query_tile, ord='euclidean', axis=2) ### shape: [self.n_query_all, self.n_way]
-        # self.loss_pro_aug = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.query_labels_vec,
-        #                                                                            logits=self.logits_pro_aug,
-        #                                                                            name='loss_pro_aug'))
-        # self.acc_pro_aug = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
+        self.acc_pro_aug_val = tf.nn.in_top_k(self.logits_pro_aug, self.query_labels, k=1)
+        self.loss_pro_aug_val = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.query_labels_vec,
+                                                                                       logits=self.logits_pro_aug,
+                                                                                       name='loss_pro_aug_val'))
         
         ### Anti-collapse regularizer in AFHN (K. Li, CVPR 2020)
+        self.z_all_reshape = tf.reshape(self.z_all, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.z_dim]
+        self.z_1 = tf.reshape(tf.slice(self.z_all_reshape, begin=[0,0,0], size=[self.n_way, 1, self.z_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.z_dim]
+        self.z_2 = tf.reshape(tf.slice(self.z_all_reshape, begin=[0,1,0], size=[self.n_way, 1, self.z_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.z_dim]
+        self.hal_feat_reshape = tf.reshape(self.hal_feat, shape=[self.n_way, self.n_aug-self.n_shot, -1]) ### shape: [self.n_way, self.n_aug-self.n_shot, self.fc_dim]
+        self.hal_feat_1 = tf.reshape(tf.slice(self.hal_feat_reshape, begin=[0,0,0], size=[self.n_way, 1, self.fc_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.fc_dim]
+        self.hal_feat_2 = tf.reshape(tf.slice(self.hal_feat_reshape, begin=[0,1,0], size=[self.n_way, 1, self.fc_dim]), shape=[self.n_way, -1]) ### shape: [self.n_way, self.fc_dim]
         squared_z_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_1), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
-        normalize_z_1 = self.z_1 / (squared_z_1 + 1e-10)
+        normalize_z_1 = self.z_1 / (squared_z_1 + 1e-5)
         squared_z_2 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.z_2), axis=1, keep_dims=True)), multiples=[1,self.z_dim])
-        normalize_z_2 = self.z_2 / (squared_z_2 + 1e-10)
+        normalize_z_2 = self.z_2 / (squared_z_2 + 1e-5)
         self.cos_sim_z1z2 = tf.reduce_sum(normalize_z_1 * normalize_z_2, axis=1)
         squared_s_1 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_1), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
-        normalize_s_1 = self.hal_feat_1 / (squared_s_1 + 1e-10)
+        normalize_s_1 = self.hal_feat_1 / (squared_s_1 + 1e-5)
         squared_s_2 = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_2), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
-        normalize_s_2 = self.hal_feat_2 / (squared_s_2 + 1e-10)
+        normalize_s_2 = self.hal_feat_2 / (squared_s_2 + 1e-5)
         self.cos_sim_s1s2 = tf.reduce_sum(normalize_s_1 * normalize_s_2, axis=1)
-        self.loss_anti_collapse = 1 / (tf.reduce_mean((1 - self.cos_sim_s1s2) / (1 - self.cos_sim_z1z2 + 1e-10)) + 1e-10)
+        self.loss_anti_collapse = 1 / (tf.reduce_mean((1 - self.cos_sim_s1s2) / (1 - self.cos_sim_z1z2 + 1e-5)) + 1e-5)
 
         ### collect update operations for moving-means and moving-variances for batch normalizations
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -1182,30 +1177,27 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         self.feat_real_2 = self.s_real ### shape: [self.n_way, self.fc_dim]
         self.feat_fake_1 = self.hal_feat_1 ### shape: [self.n_way, self.fc_dim]
         self.feat_fake_2 = self.hal_feat_2 ### shape: [self.n_way, self.fc_dim]
-        if self.with_pro:
-            self.d_logit_real_1 = self.discriminator_tf(self.proto_encoder(self.feat_real_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal)
-            self.d_logit_real_2 = self.discriminator_tf(self.proto_encoder(self.feat_real_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_1 = self.discriminator_tf(self.proto_encoder(self.feat_fake_1, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_2 = self.discriminator_tf(self.proto_encoder(self.feat_fake_2, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=True), bn_train=self.bn_train_hal, reuse=True)
-        else:
-            self.d_logit_real_1 = self.discriminator_tf(self.feat_real_1, bn_train=self.bn_train_hal)
-            self.d_logit_real_2 = self.discriminator_tf(self.feat_real_2, bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_1 = self.discriminator_tf(self.feat_fake_1, bn_train=self.bn_train_hal, reuse=True)
-            self.d_logit_fake_2 = self.discriminator_tf(self.feat_fake_2, bn_train=self.bn_train_hal, reuse=True)
+        
+        ### [2020/08/18c] discriminate real/fake in the feature space (not in the class space)
+        self.d_logit_real_1 = self.discriminator_tf(self.feat_real_1, bn_train=self.bn_train_hal)
+        self.d_logit_real_2 = self.discriminator_tf(self.feat_real_2, bn_train=self.bn_train_hal, reuse=True)
+        self.d_logit_fake_1 = self.discriminator_tf(self.feat_fake_1, bn_train=self.bn_train_hal, reuse=True)
+        self.d_logit_fake_2 = self.discriminator_tf(self.feat_fake_2, bn_train=self.bn_train_hal, reuse=True)
+
         ### (WGAN loss)
         self.loss_d_real = tf.reduce_mean(self.d_logit_real_1) + tf.reduce_mean(self.d_logit_real_2)
         self.loss_d_fake = tf.reduce_mean(self.d_logit_fake_1) + tf.reduce_mean(self.d_logit_fake_2)
         self.loss_d_tf = self.loss_d_fake - self.loss_d_real
         self.loss_g_tf = (-1) * (tf.reduce_mean(self.d_logit_fake_1) + tf.reduce_mean(self.d_logit_fake_2))
         epsilon_1 = tf.random_uniform([], 0.0, 1.0)
-        x_hat_1 = epsilon_1 * self.s_real + (1 - epsilon_1) * self.hal_feat_1
+        x_hat_1 = epsilon_1 * self.feat_real_1 + (1 - epsilon_1) * self.hal_feat_1
         # d_hat_1 = self.discriminator_tf(tf.concat((x_hat_1, self.z_1), axis=1), self.bn_train_hal, reuse=True)
         d_hat_1 = self.discriminator_tf(x_hat_1, self.bn_train_hal, reuse=True)
         self.ddx_1 = tf.gradients(d_hat_1, x_hat_1)[0]
         self.ddx_1 = tf.sqrt(tf.reduce_sum(tf.square(self.ddx_1), axis=1))
         self.ddx_1 = tf.reduce_mean(tf.square(self.ddx_1 - 1.0) * self.gp_scale)
         epsilon_2 = tf.random_uniform([], 0.0, 1.0)
-        x_hat_2 = epsilon_2 * self.s_real + (1 - epsilon_2) * self.hal_feat_2
+        x_hat_2 = epsilon_2 * self.feat_real_2 + (1 - epsilon_2) * self.hal_feat_2
         # d_hat_2 = self.discriminator_tf(tf.concat((x_hat_2, self.z_2), axis=1), self.bn_train_hal, reuse=True)
         d_hat_2 = self.discriminator_tf(x_hat_2, self.bn_train_hal, reuse=True)
         self.ddx_2 = tf.gradients(d_hat_2, x_hat_2)[0]
@@ -1226,7 +1218,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         s_test = tf.random_uniform([1, 1, self.fc_dim], 0.0, 1.0, seed=1002)
         self.hal_feat_test, self.z_test = self.build_augmentor_test(s_test, 1, 1, 3, reuse=True)
         squared_h = tf.tile(tf.sqrt(tf.reduce_sum(tf.square(self.hal_feat_test), axis=1, keep_dims=True)), multiples=[1,self.fc_dim])
-        self.hal_feat_test_normalized = self.hal_feat_test / (squared_h + 1e-10)
+        self.hal_feat_test_normalized = self.hal_feat_test / (squared_h + 1e-5)
 
         ### variables
         self.all_vars = tf.global_variables()
@@ -1291,8 +1283,8 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                 x = batch_norm(x, is_train=bn_train, name='bn1')
             x = lrelu(x, name='relu1')
             x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
-            if with_BN:
-                x = batch_norm(x, is_train=bn_train, name='bn2')
+            # if with_BN:
+            #     x = batch_norm(x, is_train=bn_train, name='bn2')
             x = tf.nn.relu(x, name='relu2')
         return x
     
@@ -1314,7 +1306,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         input_mat = tf.concat([support_ave_tile_reshape, input_z_vec], axis=1) #### shape: [n_way*(n_aug-n_shot), self.fc_dim+self.z_dim]
         hal_feat = self.hallucinator(input_mat, bn_train=self.bn_train_hal, with_BN=self.with_BN, reuse=reuse) #### shape: [n_way*(n_aug-n_shot), self.fc_dim]
         return hal_feat, input_z_vec
-    
+
     def train(self,
               image_path,
               num_epoch=100,
@@ -1340,6 +1332,9 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         
         ### episodic training
         loss_train = []
+        z1z2_train = []
+        s1s2_train = []
+        lossAR_train = []
         acc_train = []
         loss_val = []
         acc_val = []
@@ -1350,15 +1345,20 @@ class HAL_PN_AFHN(HAL_PN_GAN):
         for epoch in range(1, (num_epoch+1)):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_ite_train = []
+            z1z2_ite_train = []
+            s1s2_ite_train = []
+            lossAR_ite_train = []
             acc_ite_train = []
             loss_ite_val = []
             acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                ### [2020/08/18a] Use the same set of classes during the training of discriminator and hallucinator in each episode
+                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 if self.lambda_tf > 0:
                     for i_d_update in range(self.d_per_g):
                         ####### make support set only
                         skip_this_episode = False
-                        selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                        # selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                         try:
                             selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
                                                 for lb_idx in range(self.n_way)]
@@ -1375,7 +1375,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                                      self.learning_rate: lr})
                 ##### make episode
                 skip_this_episode = False
-                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                # selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 try:
                     selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_train[selected_lbs[lb_idx]], self.n_shot+self.n_query_all//self.n_way, replace=False)) \
                                         for lb_idx in range(self.n_way)]
@@ -1390,7 +1390,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                 query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                 support_labels = selected_lbs
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                _, loss, acc, x_tilde_i = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.hal_feat],
+                _, loss, acc, x_tilde_i, z1z2, s1s2, lossAR, h1, h2 = self.sess.run([self.opt, self.loss_all, self.acc_pro_aug, self.hal_feat, self.cos_sim_z1z2, self.cos_sim_s1s2, self.loss_anti_collapse, self.hal_feat_1, self.hal_feat_2],
                                              feed_dict={self.support_features: support_features,
                                                         self.query_features: query_features,
                                                         self.query_labels: query_labels,
@@ -1399,6 +1399,9 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                                         self.bn_train_hal: True,
                                                         self.learning_rate: lr})
                 loss_ite_train.append(loss)
+                z1z2_ite_train.append(z1z2)
+                s1s2_ite_train.append(s1s2)
+                lossAR_ite_train.append(lossAR)
                 acc_ite_train.append(np.mean(acc))
 
                 ##### visualize nearest images
@@ -1449,7 +1452,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                     query_labels = np.concatenate([np.repeat(lb_idx, self.n_query_all//self.n_way) for lb_idx in range(self.n_way)])
                     support_labels = selected_lbs
                     support_classes = np.array([self.val_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
-                    loss, acc, x_tilde_i = self.sess.run([self.loss_pro_aug, self.acc_pro_aug, self.hal_feat],
+                    loss, acc, x_tilde_i, cos_sim_ab = self.sess.run([self.loss_pro_aug_val, self.acc_pro_aug_val, self.hal_feat, self.cos_sim_ab],
                                                          feed_dict={self.support_features: support_features,
                                                                     self.query_features: query_features,
                                                                     self.query_labels: query_labels,
@@ -1458,7 +1461,32 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                                                     self.bn_train_hal: False})
                     loss_ite_val.append(loss)
                     acc_ite_val.append(np.mean(acc))
+                    # [debug]
+                    # if ite == n_ite_per_epoch:
+                        # print('cos_sim_ab:')
+                        # print(cos_sim_ab)
+                        # row_sum = np.sum(cos_sim_ab, axis=1)
+                        # n_zero_rows = np.sum([row_sum[i] == 0.0 for i in range(row_sum.shape[0])])
+                        # print('number of all-zero rows in cos_sim_ab: %d' % n_zero_rows)
+                        # if n_zero_rows > 0:
+                        #     normalize_a_tile, normalize_b_repeat = self.sess.run([self.normalize_a_tile, self.normalize_b_repeat],
+                        #                             feed_dict={self.support_features: support_features,
+                        #                                        self.query_features: query_features,
+                        #                                        self.query_labels: query_labels,
+                        #                                        self.support_labels: support_labels,
+                        #                                        self.support_classes: support_classes,
+                        #                                        self.bn_train_hal: False})
+                        #     vector_sum_of_normalize_a_tile = np.sum(normalize_a_tile, axis=2)
+                        #     print('vector_sum_of_normalize_a_tile:')
+                        #     print(vector_sum_of_normalize_a_tile)
+                        #     vector_sum_of_normalize_b_repeat = np.sum(normalize_b_repeat, axis=2)
+                        #     print('vector_sum_of_normalize_b_repeat:')
+                        #     print(vector_sum_of_normalize_b_repeat)
+                        #     break
             loss_train.append(np.mean(loss_ite_train))
+            z1z2_train.append(np.mean(z1z2_ite_train))
+            s1s2_train.append(np.mean(s1s2_ite_train))
+            lossAR_train.append(np.mean(lossAR_ite_train))
             acc_train.append(np.mean(acc_ite_train))
 
             ### [2020/07/01] test if the hallucinated features generated from the same set of noise vectors will be more and more diverse as the training proceeds
@@ -1478,8 +1506,16 @@ class HAL_PN_AFHN(HAL_PN_GAN):
                                             os.path.join(self.result_path, self.model_name, 'models_hal_pro', self.model_name + '.model-hal-pro'),
                                             global_step=epoch)
             else:
-                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f' % \
-                    (epoch, lr, np.mean(loss_ite_train), np.mean(acc_ite_train)))
+                print('---- Epoch: %d, learning_rate: %f, training loss: %f, training accuracy: %f, z1z2: %f, s1s2: %f, lossAR: %f' % \
+                    (epoch, lr, loss_train[-1], acc_train[-1], z1z2_train[-1], s1s2_train[-1], lossAR_train[-1]))
+            # [debug]
+            # print('h1.shape:')
+            # print(h1.shape)
+            # if s1s2_train[-1] < 0.00001:
+            #     print('h1:')
+            #     print(h1[0,:])
+            #     print('h2:')
+            #     print(h2[0,:])
         print('time: %4.4f' % (time.time() - start_time))
 
         if self.val_path is None:
@@ -1903,10 +1939,12 @@ class HAL_PN_PoseRef(object):
                         pose_ref_features = np.concatenate([self.train_feat_list_gallery[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
                         pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
                         pose_ref_labels = selected_lbs_pose
+                        # support_labels = np.concatenate([np.repeat(lb_idx, self.n_shot) for lb_idx in range(self.n_way)])
                         _ = self.sess.run(self.opt_d,
                                           feed_dict={self.support_features: support_features,
                                                      self.pose_ref_features: pose_ref_features,
                                                      self.pose_ref_labels: pose_ref_labels,
+                                                     # self.support_labels: support_labels,
                                                      self.bn_train_hal: True,
                                                      self.learning_rate: lr})
                 ##### make a complete episode
@@ -1932,6 +1970,7 @@ class HAL_PN_PoseRef(object):
                 pose_ref_features = np.concatenate([self.train_feat_list_gallery[selected_indexes_pose[lb_idx]] for lb_idx in range(self.n_way)])
                 pose_ref_features = np.reshape(pose_ref_features, (self.n_way, self.n_aug-self.n_shot, self.fc_dim))
                 support_labels = selected_lbs
+                # support_labels = np.concatenate([np.repeat(lb_idx, self.n_shot) for lb_idx in range(self.n_way)])
                 pose_ref_labels = selected_lbs_pose
                 support_classes = np.array([self.train_class_list_raw[selected_indexes[i][0]] for i in range(self.n_way)])
                 pose_ref_classes = np.array([self.train_class_list_raw[selected_indexes_pose[i][0]] for i in range(self.n_way)])
