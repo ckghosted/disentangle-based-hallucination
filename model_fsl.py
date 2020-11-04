@@ -590,7 +590,7 @@ class MSL_PN(FSL):
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
-            x = tf.nn.relu(x, name='relu2')
+            # x = tf.nn.relu(x, name='relu2')
         return x
     
     def train(self,
@@ -803,7 +803,7 @@ class FSL_PN_GAN(FSL):
                 x = batch_norm(x, is_train=bn_train)
             x = tf.nn.relu(x, name='relu1')
             x = linear(x, self.fc_dim, add_bias=True, name='dense2') ## [-1,self.fc_dim]
-            x = tf.nn.relu(x, name='relu2')
+            # x = tf.nn.relu(x, name='relu2')
         return x
     
     def hallucinator(self, x, bn_train, with_BN=False, reuse=False):
@@ -1117,10 +1117,211 @@ class FSL_PN_AFHN(FSL_PN_GAN):
                 x = batch_norm(x, is_train=bn_train, name='bn1')
             x = lrelu(x, name='relu1')
             x = linear_identity(x, self.fc_dim, add_bias=(~with_BN), name='dense2') ## [-1,self.fc_dim]
-            if with_BN:
-                x = batch_norm(x, is_train=bn_train, name='bn2')
+            # if with_BN:
+            #     x = batch_norm(x, is_train=bn_train, name='bn2')
             x = tf.nn.relu(x, name='relu2')
         return x
+
+    def train(self,
+              train_novel_path, ## train_novel_feat path (must be specified!)
+              train_base_path, ## train_base_feat path (must be specified!)
+              hal_from, ## e.g., hal_name (must given)
+              hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
+              image_path=None,
+              label_key='image_labels',
+              n_shot=1,
+              n_aug=20, ## minimum number of samples per training class ==> (n_aug - n_shot) more samples need to be hallucinated
+              n_top=5, ## top-n accuracy
+              bsize=1000,
+              learning_rate=1e-4,
+              num_ite=10000,
+              fix_seed=False,
+              novel_idx=None,
+              test_mode=False):
+        ### create a dedicated folder for this model
+        if os.path.exists(os.path.join(self.result_path, self.model_name)):
+            print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
+        else:
+            os.makedirs(os.path.join(self.result_path, self.model_name))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
+        
+        ### Load training features (as two dictionaries) from both base and novel classes
+        train_novel_dict = unpickle(train_novel_path)
+        features_novel_train = train_novel_dict['features']
+        labels_novel_train = [int(s) for s in train_novel_dict[label_key]]
+        train_base_dict = unpickle(train_base_path)
+        n_feat_per_base = int(len(train_base_dict[label_key]) / len(set(train_base_dict[label_key])))
+        features_base_train = train_base_dict['features']
+        labels_base_train = [int(s) for s in train_base_dict[label_key]]
+
+        ### make label mapping for novel_idx
+        label_mapping = {}
+        labels_novel_train_raw = labels_novel_train
+        all_novel_labels = sorted(set(labels_novel_train_raw))
+        for new_lb in range(len(all_novel_labels)):
+            label_mapping[all_novel_labels[new_lb]] = new_lb
+        
+        ## initialization
+        initOp = tf.global_variables_initializer()
+        self.sess.run(initOp)
+        
+        ## load previous trained hallucinator
+        could_load_hal_pro, checkpoint_counter_hal = self.load_hal_pro(hal_from, hal_from_ckpt)
+
+        features_novel_final_dict = {} #### for t-SNE feature visualization
+        if n_shot >= n_aug:
+            #### Hallucination not needed
+            selected_indexes = []
+            for lb in all_novel_labels:
+                if novel_idx is None:
+                    ##### Randomly select n-shot features from each class
+                    candidate_indexes_per_lb = [idx for idx in range(len(labels_novel_train)) \
+                                                if labels_novel_train[idx] == lb]
+                    selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot, replace=False)
+                else:
+                    selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
+                selected_indexes.extend(selected_indexes_per_lb)
+            features_novel_final = features_novel_train[selected_indexes]
+            labels_novel_final = [labels_novel_train[idx] for idx in selected_indexes]
+        else:
+            #### Hallucination needed
+            selected_indexes_novel = {}
+            for lb in all_novel_labels:
+                if novel_idx is None:
+                    ##### Randomly select n-shot features from each class
+                    candidate_indexes_per_lb = [idx for idx in range(len(labels_novel_train)) \
+                                                if labels_novel_train[idx] == lb]
+                    if fix_seed:
+                        selected_indexes_per_lb = candidate_indexes_per_lb[0:n_shot]
+                    else:
+                        selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot, replace=False)
+                else:
+                    selected_indexes_per_lb = novel_idx[label_mapping[lb],:n_shot]
+                selected_indexes_novel[lb] = selected_indexes_per_lb
+            print('selected_indexes_novel:', selected_indexes_novel)
+            #### randomly sample n_aug-n_shot features from each class (with replacement) and aggregate them to make hallucination seed
+            n_hal = n_aug - n_shot
+            features_seed_all = np.empty([n_hal * len(all_novel_labels), self.fc_dim])
+            lb_counter = 0
+            for lb in all_novel_labels:
+                # seed_indexes_for_this_lb = np.random.choice(selected_indexes_novel[lb], n_aug-n_shot, replace=True)
+                # features_seed_all[lb_counter*n_hal:(lb_counter+1)*n_hal,:] = features_novel_train[seed_indexes_for_this_lb]
+                # test np.mean() and np.repeat() behavior
+                seed_indexes_for_this_lb = selected_indexes_novel[lb]
+                # temp_array = features_novel_train[seed_indexes_for_this_lb2]
+                # temp_array1 = np.mean(features_novel_train[seed_indexes_for_this_lb2], axis=0)
+                # temp_array2 = np.repeat(np.mean(features_novel_train[seed_indexes_for_this_lb2], axis=0, keepdims=True), repeats=n_hal, axis=0)
+                # print('temp_array1.shape:', temp_array1.shape)
+                # print('temp_array2.shape:', temp_array2.shape)
+                features_seed_all[lb_counter*n_hal:(lb_counter+1)*n_hal,:] = np.repeat(np.mean(features_novel_train[seed_indexes_for_this_lb], axis=0, keepdims=True), repeats=n_hal, axis=0)
+                lb_counter += 1
+            #### make hallucination for all novel labels at once
+            if not could_load_hal_pro:
+                print('Load hallucinator or mlp linear classifier fail!!!!!!')
+                feature_hallucinated_all = features_seed_all
+            else:
+                input_z = np.random.normal(loc=0.0, scale=self.z_std, size=(n_hal*len(all_novel_labels), self.z_dim))
+                features_and_noise = np.concatenate((features_seed_all, input_z), axis=1)
+                feature_hallucinated_all = self.sess.run(self.hallucinated_features,
+                                                         feed_dict={self.features_and_noise: features_and_noise,
+                                                                    self.bn_train: False})
+                print('feature_hallucinated_all.shape: %s' % (feature_hallucinated_all.shape,))
+            #### combine hallucinated and real features to make the final novel feature set
+            features_novel_final = np.empty([n_aug * len(all_novel_labels), self.fc_dim])
+            labels_novel_final = []
+            lb_counter = 0
+            for lb in all_novel_labels:
+                real_features_per_lb = features_novel_train[selected_indexes_novel[lb]]
+                hal_features_per_lb = feature_hallucinated_all[lb_counter*n_hal:(lb_counter+1)*n_hal]
+                features_novel_final[lb_counter*n_aug:(lb_counter+1)*n_aug,:] = \
+                    np.concatenate((real_features_per_lb, hal_features_per_lb), axis=0)
+                labels_novel_final.extend([lb for _ in range(n_aug)])
+                lb_counter += 1
+                features_novel_final_dict[lb] = np.concatenate((real_features_per_lb, hal_features_per_lb), axis=0)
+        
+        print('features_novel_final.shape:', features_novel_final.shape)
+        print('len(labels_novel_final):', len(labels_novel_final))
+        print('features_base_train.shape:', features_base_train.shape)
+        print('len(labels_base_train):', len(labels_base_train))
+
+        ### main training loop
+        n_used_classes = len(all_novel_labels) + self.n_base_class
+        n_base_per_batch = int(bsize * (self.n_base_class / n_used_classes))
+        n_novel_per_batch = bsize - n_base_per_batch
+        loss_train = []
+        acc_train = []
+        top_n_acc_train = []
+        for ite in range(num_ite):
+            batch_idx_base = np.random.choice(len(labels_base_train), n_base_per_batch, replace=False)
+            batch_idx_novel = np.random.choice(len(labels_novel_final), n_novel_per_batch, replace=True)
+            if ite == 0:
+                print('len(batch_idx_base):', len(batch_idx_base))
+                print('len(batch_idx_novel):', len(batch_idx_novel))
+            batch_features = np.concatenate((features_base_train[batch_idx_base], features_novel_final[batch_idx_novel]), axis=0)
+            batch_labels = np.array([labels_base_train[i] for i in batch_idx_base]+[labels_novel_final[i] for i in batch_idx_novel])
+            _, loss, logits = self.sess.run([self.opt_fsl_cls, self.loss, self.logits],
+                                            feed_dict={self.features: batch_features,
+                                                       self.labels: batch_labels,
+                                                       self.bn_train: False,
+                                                       self.learning_rate: learning_rate})
+            loss_train.append(loss)
+            y_true = batch_labels
+            y_pred = np.argmax(logits, axis=1)
+            acc_train.append(accuracy_score(y_true, y_pred))
+            best_n = np.argsort(logits, axis=1)[:,-n_top:]
+            top_n_acc_train.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
+            if ite % (num_ite//20) == 0:
+                print('Ite: %d, train loss: %f, train accuracy: %f, top-%d train accuracy: %f' % \
+                      (ite, loss_train[-1], acc_train[-1], n_top, top_n_acc_train[-1]))
+        ## [20181025] We are not running validation during FSL training since it is meaningless.
+        ## Just save the final model
+        self.saver.save(self.sess,
+                        os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                        global_step=ite)
+
+        if test_mode:
+            ### Get the class codes of all seed and hal features
+            features_novel_embeded_dict = {}
+            features_novel_final_array = np.empty([len(all_novel_labels), n_aug, self.fc_dim])
+            lb_counter = 0
+            for lb in all_novel_labels:
+                features_novel_final_array[lb_counter,:,:] = features_novel_final_dict[lb]
+                lb_counter += 1
+            features_novel_embeded_array = self.sess.run(self.novel_code_class,
+                                                         feed_dict={self.novel_feat: np.reshape(features_novel_final_array, [-1, self.fc_dim]), #### shape: [len(all_novel_labels) * n_aug, self.fc_dim]
+                                                                    self.bn_train: False})
+            features_novel_embeded_array_reshape = np.reshape(features_novel_embeded_array, [len(all_novel_labels), n_aug, self.fc_dim])
+            lb_counter = 0
+            for lb in all_novel_labels:
+                features_novel_embeded_dict[lb] = features_novel_embeded_array_reshape[lb_counter,:,:]
+                lb_counter += 1
+        
+            ### encode novel features using the two encoders for visualization
+            novel_code_class_all = []
+            nBatches_novel = int(np.ceil(features_novel_train.shape[0] / bsize))
+            for idx in tqdm.tqdm(range(nBatches_novel)):
+                batch_features = features_novel_train[idx*bsize:(idx+1)*bsize]
+                novel_code_class = self.sess.run(self.novel_code_class,
+                                                 feed_dict={self.novel_feat: batch_features,
+                                                            self.bn_train: False})
+                novel_code_class_all.append(novel_code_class)
+            novel_code_class_all = np.concatenate(novel_code_class_all, axis=0)
+
+            ### encode base features using the two encoders for visualization
+            base_code_class_all = []
+            nBatches_base = int(np.ceil(features_base_train.shape[0] / bsize))
+            for idx in tqdm.tqdm(range(nBatches_base)):
+                batch_features = features_base_train[idx*bsize:(idx+1)*bsize]
+                #### (reuse self.novel_code_class, self.novel_code_pose, and self.novel_feat for convenience)
+                base_code_class = self.sess.run(self.novel_code_class,
+                                                feed_dict={self.novel_feat: batch_features,
+                                                           self.bn_train: False})
+                base_code_class_all.append(base_code_class)
+            base_code_class_all = np.concatenate(base_code_class_all, axis=0)
+
+            return [loss_train, acc_train, features_novel_final_dict, features_novel_embeded_dict, novel_code_class_all, base_code_class_all]
+        else:
+            return [loss_train, acc_train, features_novel_final_dict]
 
 class FSL_PN_PoseRef(FSL):
     def __init__(self,
@@ -1758,11 +1959,13 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
             os.makedirs(os.path.join(self.result_path, self.model_name))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
         
+        wnid_to_category = unpickle(os.path.join('/data/put_data/cclin/datasets/ILSVRC2012', 'wnid_to_category_dict'))
+        
         ### Load training features (as two dictionaries) from both base and novel classes
         train_novel_dict = unpickle(train_novel_path)
         features_novel_train = train_novel_dict['features']
         labels_novel_train = [int(s) for s in train_novel_dict[label_key]]
-        # fnames_novel_train = train_novel_dict['image_names']
+        fnames_novel_train = train_novel_dict['image_names']
         train_base_dict = unpickle(train_base_path)
         n_feat_per_base = int(len(train_base_dict[label_key]) / len(set(train_base_dict[label_key])))
         features_base_train = train_base_dict['features']
@@ -1779,7 +1982,7 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
         train_base_dict = unpickle(os.path.join(os.path.dirname(train_base_path), 'base_train_feat'))
         features_base_train = train_base_dict['features']
         labels_base_train = [int(s) for s in train_base_dict[label_key]]
-        # fnames_base_train = train_base_dict['image_names']
+        fnames_base_train = train_base_dict['image_names']
         if self.n_gallery_per_class > 0:
             ### load the index array for the gallery set
             if self.use_canonical_gallery:
@@ -1793,17 +1996,17 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
                 gallery_index_array = np.load(gallery_index_path, allow_pickle=True)
                 features_base_gallery = features_base_train[gallery_index_array]
                 labels_base_gallery = [labels_base_train[idx] for idx in range(len(labels_base_train)) if idx in gallery_index_array]
-                # fnames_base_gallery = [fnames_base_train[idx] for idx in range(len(labels_base_train)) if idx in gallery_index_array]
+                fnames_base_gallery = [fnames_base_train[idx] for idx in range(len(labels_base_train)) if idx in gallery_index_array]
                 # print('labels_base_gallery:', labels_base_gallery)
             else:
                 print('Load gallery_index_array fail ==> use the whole base-class dataset as the gallery set')
                 features_base_gallery = features_base_train
                 labels_base_gallery = labels_base_train
-                # fnames_base_gallery = fnames_base_train
+                fnames_base_gallery = fnames_base_train
         else:
             features_base_gallery = features_base_train
             labels_base_gallery = labels_base_train
-            # fnames_base_gallery = fnames_base_train
+            fnames_base_gallery = fnames_base_train
         candidate_indexes_each_lb_gallery = {}
         for lb in sorted(set(labels_base_gallery)):
             candidate_indexes_each_lb_gallery[lb] = [idx for idx in range(len(labels_base_gallery)) if labels_base_gallery[idx] == lb]
@@ -1877,8 +2080,7 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
             #### (1) compute feature average for each base class
             feat_ave = {}
             for lb in sorted(set(labels_base_gallery)):
-                candidate_indexes_each_lb = [idx for idx in range(len(labels_base_gallery)) if labels_base_gallery[idx] == lb]
-                feat_ave[lb] = np.mean(features_base_gallery[candidate_indexes_each_lb], axis=0)
+                feat_ave[lb] = np.mean(features_base_gallery[candidate_indexes_each_lb_gallery[lb]], axis=0)
             #### (2) use the above feature average to compute the closest class list for each novel class
             closest_class_dict = {}
             lb_counter = 0
@@ -1893,13 +2095,21 @@ class FSL_PN_PoseRef_Before(FSL_PN_PoseRef):
             
             #### choose the class corresponding to the nearest feature for each seed
             selected_indexes = {}
-            fnames_pose_feat = []
+            fnames_seed = {}
+            fnames_pose_feat = {}
             for lb in all_novel_labels:
                 lbs_for_pose_ref = [closest_class_dict[lb][idx][0] for idx in range(self.n_base_lb_per_novel)]
                 candidate_indexes_for_this_novel = [item for sublist in [candidate_indexes_each_lb_gallery[i] for i in lbs_for_pose_ref] for item in sublist]
                 selected_indexes[lb] = list(np.random.choice(candidate_indexes_for_this_novel, n_hal, replace=False))
-                # fnames_pose_feat.append(fnames_base_gallery[selected_indexes[lb][0]])
                 pose_feat_dict[lb] = features_base_gallery[selected_indexes[lb]]
+                #print('label %02d' % lb)
+                #fnames_seed[lb] = [fnames_novel_train[i][0:9] for i in selected_indexes_novel[lb]]
+                #print('fnames_seed:', fnames_seed[lb][0], end=' ')
+                #print('(%s)' % wnid_to_category[fnames_seed[lb][0]])
+                #fnames_pose_feat[lb] = [fnames_base_gallery[i][0:9] for i in selected_indexes[lb]]
+                #for i in range(len(fnames_pose_feat[lb])):
+                #    print('fnames_pose_feat:', fnames_pose_feat[lb][i], end=' ')
+                #    print('(%s)' % wnid_to_category[fnames_pose_feat[lb][i]])
             pose_feat = np.concatenate([pose_feat_dict[lb] for lb in all_novel_labels])
 
             # if self.n_gallery_per_class > 0:

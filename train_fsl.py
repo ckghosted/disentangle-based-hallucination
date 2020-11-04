@@ -77,7 +77,7 @@ def main():
     args = parser.parse_args()
     train(args)
     inference(args)
-    if args.test_mode:
+    if args.test_mode and args.ite_idx == 0:
         visualize(args)
 
 # Hallucination and training
@@ -439,21 +439,21 @@ def plot_emb_results(_emb, # 2-dim feature
                 plt.scatter(x=X_embedded_lb[n_aug:n_feat_per_lb, 0],
                             y=X_embedded_lb[n_aug:n_feat_per_lb, 1],
                             color=color_list[color_idx],
-                            alpha=0.2,
+                            alpha=0.4,
                             marker='x',
                             s=30)
             #### plot hallucinated features as triangles
             if plot_hal:
                 plt_lb.append(plt.scatter(x=X_embedded_lb[n_shot:n_aug, 0],
                                           y=X_embedded_lb[n_shot:n_aug, 1],
-                                          alpha=0.5,
+                                          alpha=0.2,
                                           marker='^',
                                           color=color_list[color_idx],
                                           s=60))
             else:
                 plt_lb.append(plt.scatter(x=X_embedded_lb[n_shot:n_aug, 0],
                                           y=X_embedded_lb[n_shot:n_aug, 1],
-                                          alpha=0.5,
+                                          alpha=0.2,
                                           marker='^',
                                           color='white',
                                           s=60))

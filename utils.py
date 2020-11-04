@@ -54,12 +54,56 @@ def get_image_resize(image_path, img_size, center_crop=False, aug_size=256):
     img = img / 255.0
     return img
 
-def get_image_resize_normalize(image_path, img_size, center_crop=False, aug_size=256):
+def get_image_resize_normalize(image_path, img_size, random_flip=False, random_crop=False, center_crop=False, aug_size=256):
     # img = skimage.io.imread(image_path)
     # img = img / 255.0
     # return skimage.transform.resize(img, [img_size, img_size])
+    ratio = [3.0/4.0, 4.0/3.0]
     img = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    if center_crop:
+    if random_flip and np.random.random_sample() > 0.5:
+        img = cv2.flip(img, 1)
+    if random_crop:
+        # https://pytorch.org/docs/stable/_modules/torchvision/transforms/transforms.html#RandomResizedCrop
+        crop_scale = np.random.uniform(0.08, 1.0)
+        crop_ratio = np.random.uniform(ratio[0], ratio[1])
+        height = img.shape[0]
+        width = img.shape[1]
+        area = height * width
+        for _ in range(10):
+            target_area = area * crop_scale
+            w = int(round(np.sqrt(target_area * crop_ratio)))
+            h = int(round(np.sqrt(target_area / crop_ratio)))
+            if 0 < w <= width and 0 < h <= height:
+                x1 = np.random.randint(0, height - h + 1)
+                x2 = x1 + h
+                y1 = np.random.randint(0, width - w + 1)
+                y2 = y1 + w
+                img = img[x1:x2, y1:y2]
+                img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = img / 255.0
+                return (img - MEAN) / STD
+        # Fallback to central crop
+        in_ratio = float(width) / float(height)
+        if in_ratio < min(ratio):
+            w = width
+            h = int(round(w / min(ratio)))
+        elif in_ratio > max(ratio):
+            h = height
+            w = int(round(h * max(ratio)))
+        else:  # whole image
+            w = width
+            h = height
+        x1 = (height - h) // 2
+        x2 = x1 + h
+        y1 = (width - w) // 2
+        y2 = y1 + w
+        img = img[x1:x2, y1:y2]
+        img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img / 255.0
+        return (img - MEAN) / STD
+    elif center_crop:
         img = cv2.resize(img, (aug_size, aug_size), interpolation=cv2.INTER_CUBIC)
         # center crop from 256 into 224 ==> (x1, x2) = (y1, y2) = (16, 240)
         x1 = int((aug_size - img_size) / 2)
@@ -67,11 +111,14 @@ def get_image_resize_normalize(image_path, img_size, center_crop=False, aug_size
         y1 = int((aug_size - img_size) / 2)
         y2 = y1 + img_size
         img = img[x1:x2, y1:y2]
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img / 255.0
+        return (img - MEAN) / STD
     else:
         img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img / 255.0
-    return (img - MEAN) / STD
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img / 255.0
+        return (img - MEAN) / STD
 
 def get_image_resize_gray(image_path, img_size):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
