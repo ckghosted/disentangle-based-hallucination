@@ -1918,12 +1918,15 @@ class HAL_PN_PoseRef(object):
             loss_ite_val = []
             acc_ite_val = []
             for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                ### [2020/08/18a] Use the same set of classes during the training of discriminator and hallucinator in each episode
+                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
                 if self.lambda_gan > 0:
                     for i_d_update in range(self.d_per_g):
                         ####### make a small episode (no need query for discriminator training)
                         skip_this_episode = False
-                        selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
-                        selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
+                        # selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                        # selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
                         try:
                             selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_probe[selected_lbs[lb_idx]], self.n_shot, replace=False)) \
                                                 for lb_idx in range(self.n_way)]
@@ -1949,8 +1952,8 @@ class HAL_PN_PoseRef(object):
                                                      self.learning_rate: lr})
                 ##### make a complete episode
                 skip_this_episode = False
-                selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
-                selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
+                # selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
+                # selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
                 try:
                     selected_indexes = [list(np.random.choice(self.candidate_indexes_each_lb_probe[selected_lbs[lb_idx]], self.n_intra+self.n_shot+self.n_query_all//self.n_way, replace=False)) \
                                         for lb_idx in range(self.n_way)]
