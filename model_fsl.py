@@ -1488,8 +1488,8 @@ class FSL_PN_PoseRef(FSL):
             os.makedirs(os.path.join(self.result_path, self.model_name))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
         
-        wnid_to_category = unpickle(os.path.join('/data/put_data/cclin/datasets/ILSVRC2012', 'wnid_to_category_dict'))
-        miniLable_to_wnid = unpickle(os.path.join(os.path.dirname(train_base_path), 'lable_to_wnid_dict'))
+        #wnid_to_category = unpickle(os.path.join('/data/put_data/cclin/datasets/ILSVRC2012', 'wnid_to_category_dict'))
+        #miniLable_to_wnid = unpickle(os.path.join(os.path.dirname(train_base_path), 'lable_to_wnid_dict'))
 
         ### Load training features (as two dictionaries) from both base and novel classes
         train_novel_dict = unpickle(train_novel_path)
@@ -1631,10 +1631,10 @@ class FSL_PN_PoseRef(FSL):
                 # fnames_pose_feat.append(fnames_base_gallery[selected_indexes[lb][0]])
                 pose_feat_dict[lb] = features_base_gallery[selected_indexes[lb]]
                 # print('for novel class %d, selected poseRef labels:' % lb, lbs_for_pose_ref)
-                print('for novel class %d (%s: %s), closest base classes are:' % (lb, miniLable_to_wnid[lb], wnid_to_category[miniLable_to_wnid[lb]]))
-                temp_closest_class_dict = closest_class_dict[lb][0:5]
-                for item in temp_closest_class_dict:
-                    print('    %d (%s: %s)' % (item[0], miniLable_to_wnid[item[0]], wnid_to_category[miniLable_to_wnid[item[0]]]))
+                #print('for novel class %d (%s: %s), closest base classes are:' % (lb, miniLable_to_wnid[lb], wnid_to_category[miniLable_to_wnid[lb]]))
+                #temp_closest_class_dict = closest_class_dict[lb][0:5]
+                #for item in temp_closest_class_dict:
+                #    print('    %d (%s: %s)' % (item[0], miniLable_to_wnid[item[0]], wnid_to_category[miniLable_to_wnid[item[0]]]))
             pose_feat = np.concatenate([pose_feat_dict[lb] for lb in all_novel_labels])
 
             # if self.n_gallery_per_class > 0:
