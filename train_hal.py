@@ -72,6 +72,7 @@ def main():
     parser.add_argument('--n_gallery_per_class', default=0, type=int, help='Number of gallery samples per class (default 0: use the whole base-class dataset as both gallery and probe)')
     args = parser.parse_args()
     train(args)
+    # extract_pose(args)
 
 # Train the hallucinator
 def train(args):
@@ -320,6 +321,89 @@ def train(args):
                     bbox_inches='tight')
         plt.close(fig)
 
+def extract_pose(args):
+    print('==================== extract_pose ====================')
+    if args.exp_tag == 'cv':
+        train_pickled_fname = 'cv_base_train_feat'
+    elif args.exp_tag == 'final':
+        train_pickled_fname = 'final_base_train_feat'
+    elif args.exp_tag == 'common':
+        train_pickled_fname = 'base_train_feat'
+        val_pickled_fname = 'val_train_feat'
+    train_path = os.path.join(args.result_path, args.extractor_folder, train_pickled_fname)
+    if args.run_validation:
+        val_path = os.path.join(args.result_path, args.extractor_folder, val_pickled_fname)
+    else:
+        val_path = None
+    
+    tf.reset_default_graph()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+        if args.PoseRef:
+            if args.ave_before_encode:
+                print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef_Before')
+                net = HAL_PN_PoseRef_Before(sess,
+                                     model_name=args.hallucinator_name,
+                                     result_path=args.result_path,
+                                     train_path=train_path,
+                                     val_path=val_path,
+                                     label_key=args.label_key,
+                                     n_way=args.n_way,
+                                     n_shot=args.n_shot,
+                                     n_aug=args.n_aug,
+                                     n_query_all=args.n_query_all,
+                                     n_intra=args.n_intra,
+                                     fc_dim=args.fc_dim,
+                                     l2scale=args.l2scale,
+                                     n_train_class=args.n_train_class,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     num_parallel_calls=args.num_parallel_calls,
+                                     lambda_meta=args.lambda_meta,
+                                     lambda_recon=args.lambda_recon,
+                                     lambda_consistency=args.lambda_consistency,
+                                     lambda_consistency_pose=args.lambda_consistency_pose,
+                                     lambda_intra=args.lambda_intra,
+                                     lambda_pose_code_reg=args.lambda_pose_code_reg,
+                                     lambda_aux=args.lambda_aux,
+                                     lambda_gan=args.lambda_gan,
+                                     lambda_tf=args.lambda_tf,
+                                     d_per_g=args.d_per_g,
+                                     n_gallery_per_class=args.n_gallery_per_class)
+            else:
+                print('train_hal.py --> main() --> train(): use HAL_PN_PoseRef')
+                net = HAL_PN_PoseRef(sess,
+                                     model_name=args.hallucinator_name,
+                                     result_path=args.result_path,
+                                     train_path=train_path,
+                                     val_path=val_path,
+                                     label_key=args.label_key,
+                                     n_way=args.n_way,
+                                     n_shot=args.n_shot,
+                                     n_aug=args.n_aug,
+                                     n_query_all=args.n_query_all,
+                                     n_intra=args.n_intra,
+                                     fc_dim=args.fc_dim,
+                                     l2scale=args.l2scale,
+                                     n_train_class=args.n_train_class,
+                                     with_BN=args.with_BN,
+                                     with_pro=args.with_pro,
+                                     num_parallel_calls=args.num_parallel_calls,
+                                     lambda_meta=args.lambda_meta,
+                                     lambda_recon=args.lambda_recon,
+                                     lambda_consistency=args.lambda_consistency,
+                                     lambda_consistency_pose=args.lambda_consistency_pose,
+                                     lambda_intra=args.lambda_intra,
+                                     lambda_pose_code_reg=args.lambda_pose_code_reg,
+                                     lambda_aux=args.lambda_aux,
+                                     lambda_gan=args.lambda_gan,
+                                     lambda_tf=args.lambda_tf,
+                                     d_per_g=args.d_per_g,
+                                     n_gallery_per_class=args.n_gallery_per_class)
+            all_vars, trainable_vars, all_regs = net.build_model()
+            hal_from = os.path.join(args.result_path, args.hallucinator_name, 'models_hal_pro')
+            net.extract_pose(hal_from=hal_from,
+                             bsize=1000)
 
 if __name__ == '__main__':
     main()

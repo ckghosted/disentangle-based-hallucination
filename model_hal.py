@@ -2124,7 +2124,7 @@ class HAL_PN_PoseRef(object):
             train_code_class_all.append(train_code_class)
             train_code_pose_all.append(train_code_pose)
         train_code_class_all = np.concatenate(train_code_class_all, axis=0)
-        train_code_pose_all = np.concatenate(train_code_pose_all, axis=0)
+        train_code_pose_all = np.concatenate(train_code_pose_all, axis=0)        
         X_code_class = None
         Y_code = None
         lb_for_dim_reduction = np.random.choice(sorted(self.all_train_labels), 5, replace=False)
@@ -2173,6 +2173,62 @@ class HAL_PN_PoseRef(object):
             return [loss_train, acc_train]
         else:
             return [loss_train, acc_train, loss_val, acc_val]
+
+    def extract_pose(self,
+                     hal_from, ## e.g., hal_name (must given)
+                     hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
+                     bsize=1000):
+        ## initialization
+        initOp = tf.global_variables_initializer()
+        self.sess.run(initOp)
+        
+        ## load previous trained hallucinator
+        could_load_hal_pro, checkpoint_counter_hal = self.load_hal_pro(hal_from, hal_from_ckpt)
+
+        if could_load_hal_pro:
+            # train_code_class_all = []
+            train_code_pose_all = []
+            nBatches = int(np.ceil(self.train_feat_list.shape[0] / bsize))
+            for idx in tqdm.tqdm(range(nBatches)):
+                batch_features = self.train_feat_list[idx*bsize:(idx+1)*bsize]
+                # train_code_class, train_code_pose = self.sess.run([self.train_code_class, self.train_code_pose],
+                train_code_pose = self.sess.run(self.train_code_pose,
+                                                feed_dict={self.train_feat: batch_features,
+                                                           self.bn_train_hal: False})
+                # train_code_class_all.append(train_code_class)
+                train_code_pose_all.append(train_code_pose)
+            # train_code_class_all = np.concatenate(train_code_class_all, axis=0)
+            train_code_pose_all = np.concatenate(train_code_pose_all, axis=0)
+
+            print('train_code_pose_all.shape:', train_code_pose_all.shape)
+            
+            ### [2020/11/13] save base pose codes
+            train_base_pose_dict = {}
+            train_base_pose_dict['pose_code'] = train_code_pose_all
+            train_base_pose_dict['image_names'] = self.train_base_dict['image_names']
+            train_base_pose_dict['image_labels'] = self.train_base_dict['image_labels']
+            dopickle(train_base_pose_dict, os.path.join(self.result_path, self.model_name, 'base_pose'))
+        else:
+            print('[@] Cannot load hal')
+    
+    ## for loading the trained hallucinator and prototypical network
+    def load_hal_pro(self, init_from, init_from_ckpt=None):
+        ckpt = tf.train.get_checkpoint_state(init_from)
+        if ckpt and ckpt.model_checkpoint_path:
+            if init_from_ckpt is None:
+                ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            else:
+                ckpt_name = init_from_ckpt
+            self.saver_hal_pro.restore(self.sess, os.path.join(init_from, ckpt_name))
+            counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True, counter
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False, 0
+        
+
+        
 
 class HAL_PN_PoseRef_Before(HAL_PN_PoseRef):
     def __init__(self,
