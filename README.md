@@ -14,9 +14,10 @@ with open(train_path, 'r') as reader:
 train_image_list = train_dict['image_names']
 train_class_list = train_dict['image_labels']
 </code></pre>
-For N-way k-shot episodic evaluation, use `base.json`, `val.json`, and `novel.json`; For multiclass few-shot classification, use `base_train.json`, `base_test.json`, `val_train.json`, `val_test.json`, `novel_train.json`, and `novel_test.json`.
+- For *N*-way *K*-shot episodic evaluation, use `base.json`, `val.json`, and `novel.json`  
+- For multiclass few-shot classification, use `base_train.json`, `base_test.json`, `val_train.json`, `val_test.json`, `novel_train.json`, and `novel_test.json`
 
-## 1. N-way k-shot Episodic Evaluation
+## 1. *N*-way *K*-shot Episodic Evaluation
 ### Step 0
 Setup experiment environment
 <pre><code>
@@ -151,16 +152,28 @@ Use `train_hal.py` and `model_hal.py` to train various hallucinators using the f
 # $6: n_train_class (number of base categories, e.g., cub: 100; flo: 62; mini-imagenet: 64; cifar-100: 64)
 # $7: extractor_folder (ext[1-9] from Step 1, must be specified)
 # $8: num_epoch (number of epochs, each containing 600 episodes)
+</code></pre>
 
-# (1) we do not have to train the hallucinator for the baseline
+#### Baseline
+<pre><code>
+# We do not have to train the hallucinator for the baseline
+</code></pre>
 
-# (2) cGAN (lambda_meta=1.0, no need to specify)
+#### cGAN
+<pre><code>
+# lambda_meta=1.0 (no need to specify)
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_cgan.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_cgan_m5n1a2q75_ep90
+</code></pre>
 
-# (3) AFHN (lambda_meta=1.0, lambda_tf=1.0, lambda_ar=1.0)
+#### AFHN
+<pre><code>
+# lambda_meta=1.0, lambda_tf=1.0, lambda_ar=1.0
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_afhn_1_tf1_ar1.sh 5 1 3 75 512 64 ext1 90 > ./log_hal_afhn_1_tf1_ar1_m5n1a3q75_ep90
+</code></pre>
 
-# (4) DFHN (fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50)
+#### DFHN
+<pre><code>
+# fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_1_001_001_1_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_2_002_002_2_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_5_005_005_5_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90
@@ -185,28 +198,37 @@ Use `train_fsl.py` and `model_fsl.py` to sample few shots for each valilation cl
 # $9: num_epoch (30 or 60 or 90)
 # additional arguments for DFHN on coarse-grained datasets (mini-imagenet or cifar-100)
 # $10: n_base_lb_per_novel (number of related base categories for each novel seed feature, default 0: sample reference feature from all base categories)
+</code></pre>
 
-# (1) baseline
+#### Baseline
+<pre><code>
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_baseline.sh 01 1 512 100 64 ext1 val > ./results_fsl_baseline_shot01_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_baseline_shot01_val > ./results_fsl_baseline_shot01_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_baseline_shot01_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_baseline_shot01_val_acc
+</code></pre>
 
-# (2) cGAN (lambda_meta=1.0, no need to specify)
+#### cGAN
+<pre><code>
+# lambda_meta=1.0 (no need to specify)
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_cgan.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 > ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_val > ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_val_acc
+</code></pre>
 
-# (3) AFHN (lambda_meta=1.0, lambda_tf=1.0, lambda_ar=1.0)
+#### AFHN
+<pre><code>
+# lambda_meta=1.0, lambda_tf=1.0, lambda_ar=1.0
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_afhn_1_tf1_ar1.sh 01 200 512 100 64 ext1 val m5n1a3q75 90 > ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_val > ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_val_acc
+</code></pre>
 
-## (4) DFHN (fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50)
-### 1-shot (b0)
-#### m5n1a2q75
+#### DFHN
+<pre><code>
+# fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_1_001_001_1_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
@@ -252,26 +274,45 @@ Use the best hyper-parameter setting in **Step 3** to run final evaluation using
 # $11: num_epoch (30 or 60 or 90)
 # additional arguments for DFHN on coarse-grained datasets (mini-imagenet or cifar-100)
 # $12: n_base_lb_per_novel (number of related base categories for each novel seed feature, default 0: sample reference feature from all base categories)
+</code></pre>
 
-# (1) baseline
+#### Baseline
+<pre><code>
+# Best learning rate: 3e-5
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_baseline_test.sh 01 1 512 100 64 ext1 novel 3 5 > ./results_fsl_baseline_shot01_novel
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_baseline_shot01_novel > ./results_fsl_baseline_shot01_novel_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_baseline_shot01_novel_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_baseline_shot01_novel_acc
+</code></pre>
 
-# (2) cGAN (lambda_meta=1.0, no need to specify)
+#### cGAN
+<pre><code>
+# lambda_meta=1.0 (no need to specify)
+# Best hallucinator: trained using 5-way 1-shot episodes for 90 epochs
+# Best learning rate to train the linear classifier: 3e-4
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_cgan_test.sh 01 200 512 100 64 ext1 novel 3 4 m5n1a2q75 90 > ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_novel
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_novel > ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_novel_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_novel_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_cgan_m5n1a2q75_ep90_shot01_aug200_novel_acc
+</code></pre>
 
-# (3) AFHN (lambda_meta=1.0, lambda_tf=1.0, lambda_ar=1.0)
+#### AFHN
+<pre><code>
+# lambda_meta=1.0, lambda_tf=1.0, lambda_ar=1.0
+# Best hallucinator: trained using 5-way 1-shot episodes for 90 epochs
+# Best learning rate to train the linear classifier: 3e-3
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_afhn_1_tf1_ar1_test.sh 01 200 512 100 64 ext1 novel 3 3 m5n1a3q75 90 > ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_novel
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_novel > ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_novel_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_novel_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_afhn_1_tf1_ar1_m5n1a3q75_ep90_shot01_aug200_novel_acc
+</code></pre>
 
-# (4) DFHN (fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50)
+#### DFHN
+<pre><code>
+# fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50
+# Best hallucinator: trained using 20-way 1-shot episodes for 90 epochs
+# Best learning rate to train the linear classifier: 3e-4
+# Best number of related base categories for each novel sample: 20
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_10_01_01_10_g01_test.sh 01 200 512 100 64 ext1 novel 3 4 m20n1a2q100 90 20 > ./results_fsl_dfhn_1_10_01_01_10_g01_m20n1a2q100_b20_ep90_shot01_aug200_novel
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_10_01_01_10_g01_m20n1a2q100_b20_ep90_shot01_aug200_novel > ./results_fsl_dfhn_1_10_01_01_10_g01_m20n1a2q100_b20_ep90_shot01_aug200_novel_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_10_01_01_10_g01_m20n1a2q100_b20_ep90_shot01_aug200_novel_acc
