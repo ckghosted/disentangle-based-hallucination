@@ -31,78 +31,100 @@ ln -s [path to python files] ./py_folder
 Use `train_ext.py` and `model_ext.py` to train a ResNet-18 backbone using the base-class split (`base.json`) and (optionally) extract all base/val/novel features (saved as pickle files: `base_feat`, `val_feat`, and `novel_feat`).
 <pre><code>
 # Execute the following code under the 'mini-imagenet/episodic' directory.
-# The extractor folder (specified by --model_name) will be saved under the 'mini-imagenet' folder.
-CUDA_VISIBLE_DEVICES=0 python3 py_folder/train_ext.py \
-    --result_path .. \
-    --model_name ResNet18_img224_base_ep100 \
-    --n_class 64 \
-    --train_path ./json_folder/base.json \
-    --num_epoch 100 \
-    --bsize 128 \
-    --lr_start 1e-3 \
-    --lr_decay 0.5 \
-    --lr_decay_step 10 \
-    --use_aug \
-    --with_BN \
-    --run_extraction > ../log_ResNet18_img224_base_ep100
+CUDA_VISIBLE_DEVICES=2 python3 ./py_folder/train_ext.py \
+--result_path . \
+--model_name ResNet18_img224_base_ep100_val_centerCrop \
+--n_class 64 \
+--train_path ./json_folder/base.json \
+--num_epoch 100 \
+--bsize 128 \
+--lr_start 1e-3 \
+--lr_decay 0.5 \
+--lr_decay_step 10 \
+--use_aug \
+--with_BN \
+--center_crop \
+--run_extraction > ./log_ResNet18_img224_base_ep100_val_centerCrop
 
 # set link to the extractor folder (execute 'unlink ext1' if necessary)
-ln -s ../ResNet18_img224_base_ep100 ./ext1
+ln -s ./ResNet18_img224_base_ep100_val_centerCrop ./ext1
+
 </code></pre>
 
 ### Step 2
-Use `train_episodic.py` and `model_episodic.py` to run episodic training (on base classes), validation (on validation classes), and the final evaluation (on novel classes) directly. Please refer to the following examples to execute those `script_PN_XXX.sh` files.
-#### baseline
+Use `train_episodic.py` and `model_episodic.py` to run episodic training (on base classes), validation (on validation classes), and the final evaluation (on novel classes) directly. Please refer to the following examples to execute those `script_PN_XXX.sh` files. Averaged accuracy will be printed during execution.
+
+#### cGAN
 <pre><code>
-# arguments:
-# $1: n_way
-# $2: n_shot
-# $3: n_query_all
-# ---------------
-# $4: z_dim/fc_dim
-# $5: n_base_class
-# $6: n_valid_class
-# $7: n_novel_class
-# ---------------
-# $8: num_epoch_noHal
-# $9: n_ite_per_epoch
-# ---------------
-# $10: extractor_folder (ext[1-9] from Step 1, or None: train from scratch)
-# $11: num_epoch_pretrain
-# ---------------
-# $12: num_parallel_calls
-CUDA_VISIBLE_DEVICES=0 sh ./py_folder/scripts/script_PN_baseline_noPro_lr1e5.sh \
-    5 1 75 512 64 16 20 3 6 ext1 0 4
+CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_episodic.py \
+--result_path . \
+--extractor_folder ext1 \
+--hallucinator_name HAL_PN_cGAN_m5n1a10q75_ep100_lr1e5_shot01a20 \
+--n_way 5 \
+--n_shot 1 \
+--n_aug 10 \
+--n_query_all 75 \
+--n_shot_val 1 \
+--n_aug_val 20 \
+--num_epoch 100 \
+--lr_start 1e-5 \
+--lr_decay 0.5 \
+--lr_decay_step 20 \
+--n_ite_per_epoch 600 \
+--n_train_class 64 \
+--GAN \
+--run_validation
 </code></pre>
 
-#### PoseRef and AFHN
+#### AFHN
 <pre><code>
-# arguments:
-# $1: n_way
-# $2: n_shot
-# $3: n_aug (number of samples per class in the augmented support set AFTER hallucination during training)
-# $4: n_query_all
-# ---------------
-# $5: z_dim/fc_dim
-# $6: n_base_class
-# $7: n_valid_class
-# $8: n_novel_class
-# ---------------
-# $9: num_epoch_noHal
-# $10: num_epoch_hal
-# $11: num_epoch_joint
-# $12: n_ite_per_epoch
-# ---------------
-# $13: extractor_path (ext[1-9] or None: train from scratch)
-# $14: num_epoch_pretrain
-# ---------------
-# $15: n_aug_t (number of samples per class in the augmented support set AFTER hallucination during testing)
-# ---------------
-# $16: num_parallel_calls
-CUDA_VISIBLE_DEVICES=1 sh ./py_folder/scripts/script_PN_PoseRef_1_1_1_0_0_0_0_g0_tf0_noPro_lr1e5.sh \
-    5 1 5 75 512 64 16 20 0 3 0 6 ext1 0 4 10
-CUDA_VISIBLE_DEVICES=2 sh ./py_folder/scripts/script_PN_AFHN_1_tf1_ar1_noPro_lr1e5.sh \
-    5 1 3 75 512 64 16 20 0 3 0 6 ext1 0 4 10
+CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_episodic.py \
+--result_path . \
+--extractor_folder ext1 \
+--hallucinator_name HAL_PN_AFHN_1_tf1_ar1_m5n1a10q75_ep100_lr1e5_shot01a200 \
+--n_way 5 \
+--n_shot 1 \
+--n_aug 10 \
+--n_query_all 75 \
+--n_shot_val 1 \
+--n_aug_val 200 \
+--num_epoch 100 \
+--lr_start 1e-5 \
+--lr_decay 0.5 \
+--lr_decay_step 20 \
+--n_ite_per_epoch 600 \
+--n_train_class 64 \
+--AFHN \
+--lambda_tf 1.0 \
+--lambda_ar 1.0 \
+--run_validation
+</code></pre>
+
+#### DFHN
+<pre><code>
+CUDA_VISIBLE_DEVICES=0 python3 ./script_folder/train_episodic.py \
+--result_path . \
+--extractor_folder ext1 \
+--hallucinator_name HAL_PN_DFHN_1_2_002_002_2_g01_m5n1a10q75_ep10_lr1e5_shot01a20 \
+--n_way 5 \
+--n_shot 1 \
+--n_aug 10 \
+--n_query_all 75 \
+--n_shot_val 1 \
+--n_aug_val 20 \
+--num_epoch 100 \
+--lr_start 1e-5 \
+--lr_decay 0.5 \
+--lr_decay_step 20 \
+--n_ite_per_epoch 600 \
+--n_train_class 64 \
+--DFHN \
+--lambda_recon 2.0 \
+--lambda_consistency 0.02 \
+--lambda_consistency_pose 0.02 \
+--lambda_intra 2.0 \
+--lambda_gan 0.1 \
+--run_validation
 </code></pre>
 
 ## 2. Multiclass Few-shot Classification
