@@ -174,12 +174,10 @@ CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_afhn_1_tf1_ar1.sh 5 1 3 75 
 #### DFHN
 <pre><code>
 # fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50
-CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_1_001_001_1_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_2_002_002_2_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_5_005_005_5_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_10_01_01_10_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_10_01_01_10_g01_m5n1a2q75_ep90
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_20_02_02_20_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_20_02_02_20_g01_m5n1a2q75_ep90
-CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_hal_dfhn_1_50_05_05_50_g01.sh 5 1 2 75 512 64 ext1 90 > ./log_hal_dfhn_1_50_05_05_50_g01_m5n1a2q75_ep90
 </code></pre>
 
 ### Step 3
@@ -229,30 +227,26 @@ python3 ./script_folder/acc_parser_top1.py ./results_fsl_afhn_1_tf1_ar1_m5n1a3q7
 #### DFHN
 <pre><code>
 # fix lambda_meta=1.0 and lambda_gan=0.1; tune lambda_recon=lambda_intra=X, lambda_consistency=lambda_consistency_pose=0.01*X, where X=1,2,5,10,20,50
-CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_1_001_001_1_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
-egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
-python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
-python3 ./script_folder/acc_parser_top1.py ./results_fsl_dfhn_1_1_001_001_1_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
+
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_2_002_002_2_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_dfhn_1_2_002_002_2_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
+
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_5_005_005_5_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_dfhn_1_5_005_005_5_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
+
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_10_01_01_10_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_10_01_01_10_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_10_01_01_10_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_10_01_01_10_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_10_01_01_10_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_dfhn_1_10_01_01_10_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
+
 CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_20_02_02_20_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_20_02_02_20_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
 egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_20_02_02_20_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_20_02_02_20_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_20_02_02_20_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 python3 ./script_folder/acc_parser_top1.py ./results_fsl_dfhn_1_20_02_02_20_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
-CUDA_VISIBLE_DEVICES=0 sh ./script_folder/script_fsl_dfhn_1_50_05_05_50_g01.sh 01 200 512 100 64 ext1 val m5n1a2q75 90 0 > ./results_fsl_dfhn_1_50_05_05_50_g01_m5n1a2q75_ep90_b0_shot01_aug200_val
-egrep 'WARNING: the output path|top-5 test accuracy' ./results_fsl_dfhn_1_50_05_05_50_g01_m5n1a2q75_ep90_b0_shot01_aug200_val > ./results_fsl_dfhn_1_50_05_05_50_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
-python3 ./script_folder/acc_parser.py ./results_fsl_dfhn_1_50_05_05_50_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
-python3 ./script_folder/acc_parser_top1.py ./results_fsl_dfhn_1_50_05_05_50_g01_m5n1a2q75_ep90_b0_shot01_aug200_val_acc
 </code></pre>
 
 ### Step 4
