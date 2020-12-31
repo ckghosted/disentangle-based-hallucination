@@ -9,7 +9,7 @@ do
         do
             for ite_idx in $(seq 0 1 99);
             do
-                python3 ./script_folder/train_fsl.py \
+                python3 ./py_folder/train_fsl.py \
                     --n_shot $1 \
                     --n_aug $2 \
                     --fc_dim $3 \

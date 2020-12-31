@@ -1,4 +1,4 @@
-python3 ./script_folder/train_hal.py \
+python3 ./py_folder/train_hal.py \
     --n_way $1 \
     --n_shot $2 \
     --n_aug $3 \

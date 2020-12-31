@@ -4,7 +4,7 @@ do
     do
         for ite_idx in 0 1 2 3 4 
         do
-            python3 ./script_folder/train_fsl.py \
+            python3 ./py_folder/train_fsl.py \
                 --n_shot $1 \
                 --n_aug $2 \
                 --fc_dim $3 \
