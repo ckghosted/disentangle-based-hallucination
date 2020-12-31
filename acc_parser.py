@@ -17,12 +17,10 @@ with open(sys.argv[1], 'r') as fhand:
     str_to_print_all = []
     loss_list_ave_all = []
     acc_novel_list_ave_all = []
-    lr_list = []
-    n_row_per_l2_reg_power = 0
     for line in fhand:
         line = line.strip()
         if re.search('^WARNING', line):
-            if re.search('_0" already exists!', line):
+            if re.search('_ite0" already exists!', line):
                 ##### if 'acc_list' is not empty, it means that we already collect some results
                 ##### ==> print the results and clear 'acc_list' for the next result
                 if not len(acc_list) == 0:
@@ -40,11 +38,6 @@ with open(sys.argv[1], 'r') as fhand:
                 lr_base = re.search('_lr([0-9]+)e[0-9]+_ite', line).group(1)
                 lr_power = re.search('_lr[0-9]+e([0-9]+)_ite', line).group(1)
                 lr = lr_base+'e-'+lr_power
-                lr_float = float(lr)
-                ##### compute number of records per L2-regularizer power (set once and fixed)
-                if len(lr_list) > 0 and lr_float < lr_list[-1] and n_row_per_l2_reg_power == 0:
-                    n_row_per_l2_reg_power = len(lr_list)
-                lr_list.append(lr_float)
             ## Extract n_shot and n_aug
             if re.search('shot[0-9]+aug[0-9]+', line):
                 n_shot = re.search('shot([0-9]+)aug[0-9]+', line).group(1)
@@ -64,21 +57,13 @@ with open(sys.argv[1], 'r') as fhand:
 
 # print the best hyper-parameter (with the corresponding l2_reg_power)
 print('----------')
-used_l2_reg_power = ['1e-5', '1e-4', '1e-3', '1e-2', '1e-1']
-if n_row_per_l2_reg_power == 0:
-    n_row_per_l2_reg_power = len(lr_list)
-# print('n_row_per_l2_reg_power:', n_row_per_l2_reg_power)
-# (1) best record based on the min loss
+# (1) based on the min loss
 best_idx = np.argmin(loss_list_ave_all)
 # print('best_idx:', best_idx)
-best_l2_reg_power = used_l2_reg_power[best_idx // n_row_per_l2_reg_power]
 print('best test loss: ', end='')
-print('l2scale=%s' % best_l2_reg_power, end=', ')
 print(str_to_print_all[best_idx])
-# (2) best record based on the max novel top-5 accuracy
+# (2) based on the max novel top-5 accuracy
 best_idx = np.argmax(acc_novel_list_ave_all)
 # print('best_idx:', best_idx)
-best_l2_reg_power = used_l2_reg_power[best_idx // n_row_per_l2_reg_power]
 print('best novel top-5 acc: ', end='')
-print('l2scale=%s' % best_l2_reg_power, end=', ')
 print(str_to_print_all[best_idx])

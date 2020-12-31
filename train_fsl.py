@@ -7,7 +7,7 @@ import numpy as np
 from model_fsl import FSL, MSL, MSL_PN
 from model_fsl import FSL_PN_GAN, FSL_PN_GAN2
 from model_fsl import FSL_PN_AFHN
-from model_fsl import FSL_PN_PoseRef, FSL_PN_PoseRef_Before
+from model_fsl import FSL_PN_DFHN
 import os, re, glob
 
 import argparse
@@ -47,32 +47,31 @@ def main():
     parser.add_argument('--n_shot', default=1, type=int, help='Number of shot')
     parser.add_argument('--n_aug', default=40, type=int, help='Number of samples per training class AFTER hallucination')
     parser.add_argument('--n_top', default=5, type=int, help='Number to compute the top-n accuracy')
-    parser.add_argument('--bsize', default=64, type=int, help='Batch size for training the final linear classifier')
+    parser.add_argument('--num_ite', default=1000, type=int, help='Number of iterations for training the final linear classifier')
+    parser.add_argument('--bsize', default=100, type=int, help='Batch size for training the final linear classifier')
     parser.add_argument('--learning_rate', default=1e-6, type=float, help='Learning rate for training the final linear classifier')
-    parser.add_argument('--l2scale', default=1e-3, type=float, help='L2-regularizer scale for training the final linear classifier')
-    parser.add_argument('--num_ite', default=10000, type=int, help='Number of iterations for training the final linear classifier')
+    parser.add_argument('--l2scale', default=0.0, type=float, help='L2-regularizer scale for training the final linear classifier')
     parser.add_argument('--fc_dim', default=512, type=int, help='Feature dimension')
     parser.add_argument('--debug', action='store_true', help='Debug mode if present')
     parser.add_argument('--label_key', default='image_labels', type=str, help='image_labels or image_labels_id')
     parser.add_argument('--exp_tag', type=str, help='cv or final for imagenet-1k; val or novel for other datasets')
     parser.add_argument('--GAN', action='store_true', help='Use GAN-based hallucinator if present')
     parser.add_argument('--GAN2', action='store_true', help='Use GAN-based hallucinator (with one more layer in the hallucinator) if present')
-    parser.add_argument('--PoseRef', action='store_true', help='Use PoseRef-based hallucinator if present')
-    parser.add_argument('--AFHN', action='store_true', help='Use AFHN-based hallucinator if present')
+    parser.add_argument('--AFHN', action='store_true', help='Use AFHN if present')
+    parser.add_argument('--DFHN', action='store_true', help='Use DFHN if present')
     parser.add_argument('--MSL', action='store_true', help='Train MSL (many-shot learning) classifier using features if present')
     parser.add_argument('--MSL_PN', action='store_true', help='Train MSL (many-shot learning) classifier using class codes if present')
     parser.add_argument('--z_dim', default=100, type=int, help='Dimension of the input noise to the GAN-based hallucinator')
     parser.add_argument('--z_std', default=1.0, type=float, help='Standard deviation of the input noise to the GAN-based hallucinator')
-    parser.add_argument('--gpu_frac', default=0.5, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
+    parser.add_argument('--gpu_frac', default=1.0, type=float, help='per_process_gpu_memory_fraction (0.0~1.0)')
     parser.add_argument('--with_BN', action='store_true', help='Use batch_norm() in the feature extractor mode if present')
     parser.add_argument('--with_pro', action='store_true', help='Use additional embedding network for prototypical network if present')
     parser.add_argument('--ite_idx', default=0, type=int, help='iteration index for imagenet-1k dataset (0, 1, 2, 3, 4)')
     parser.add_argument('--n_gallery_per_class', default=0, type=int, help='Number of samples per class in the gallery set, default 0: use the whole base-class dataset')
-    parser.add_argument('--n_base_lb_per_novel', default=5, type=int, help='number of base classes as the candidates of pose-ref for each novel class')
+    parser.add_argument('--n_base_lb_per_novel', default=0, type=int, help='number of base classes as the candidates of pose-ref for each novel class')
     parser.add_argument('--use_canonical_gallery', action='store_true', help='Use gallery_indexes_canonical_XX.npy if present')
     parser.add_argument('--n_clusters_per_class', default=0, type=int, help='Number of clusters per base class for making the gallery set')
     parser.add_argument('--test_mode', action='store_true', help='After training, return novel class code and pose code if present')
-    parser.add_argument('--ave_before_encode', action='store_true', help='Use class HAL_PN_PoseRef_Before (take feature average before class encoder) if present')
     
     args = parser.parse_args()
     train(args)
@@ -117,9 +116,7 @@ def train(args):
                              n_base_class=args.n_base_class,
                              l2scale=args.l2scale,
                              z_dim=args.z_dim,
-                             z_std=args.z_std,
-                             with_BN=args.with_BN,
-                             with_pro=args.with_pro)
+                             z_std=args.z_std)
         elif args.GAN2:
             net = FSL_PN_GAN2(sess,
                               model_name=args.model_name,
@@ -129,9 +126,7 @@ def train(args):
                               n_base_class=args.n_base_class,
                               l2scale=args.l2scale,
                               z_dim=args.z_dim,
-                              z_std=args.z_std,
-                              with_BN=args.with_BN,
-                              with_pro=args.with_pro)
+                              z_std=args.z_std)
         elif args.AFHN:
             net = FSL_PN_AFHN(sess,
                               model_name=args.model_name,
@@ -141,38 +136,19 @@ def train(args):
                               n_base_class=args.n_base_class,
                               l2scale=args.l2scale,
                               z_dim=args.z_dim,
-                              z_std=args.z_std,
-                              with_BN=args.with_BN,
-                              with_pro=args.with_pro)
-        elif args.PoseRef:
-            if args.ave_before_encode:
-                net = FSL_PN_PoseRef_Before(sess,
-                                            model_name=args.model_name,
-                                            result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                            fc_dim=args.fc_dim,
-                                            n_class=args.n_class,
-                                            n_base_class=args.n_base_class,
-                                            l2scale=args.l2scale,
-                                            n_gallery_per_class=args.n_gallery_per_class,
-                                            n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                            with_BN=args.with_BN,
-                                            with_pro=args.with_pro,
-                                            use_canonical_gallery=args.use_canonical_gallery,
-                                            n_clusters_per_class=args.n_clusters_per_class)
-            else:
-                net = FSL_PN_PoseRef(sess,
-                                     model_name=args.model_name,
-                                     result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                     fc_dim=args.fc_dim,
-                                     n_class=args.n_class,
-                                     n_base_class=args.n_base_class,
-                                     l2scale=args.l2scale,
-                                     n_gallery_per_class=args.n_gallery_per_class,
-                                     n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                     with_BN=args.with_BN,
-                                     with_pro=args.with_pro,
-                                     use_canonical_gallery=args.use_canonical_gallery,
-                                     n_clusters_per_class=args.n_clusters_per_class)
+                              z_std=args.z_std)
+        elif args.DFHN:
+            net = FSL_PN_DFHN(sess,
+                              model_name=args.model_name,
+                              result_path=os.path.join(args.result_path, args.hallucinator_name),
+                              fc_dim=args.fc_dim,
+                              n_class=args.n_class,
+                              n_base_class=args.n_base_class,
+                              l2scale=args.l2scale,
+                              n_gallery_per_class=args.n_gallery_per_class,
+                              n_base_lb_per_novel=args.n_base_lb_per_novel,
+                              use_canonical_gallery=args.use_canonical_gallery,
+                              n_clusters_per_class=args.n_clusters_per_class)
         elif args.MSL:
             net = MSL(sess,
                       model_name=args.model_name,
@@ -285,9 +261,7 @@ def inference(args):
                              n_base_class=args.n_base_class,
                              l2scale=args.l2scale,
                              z_dim=args.z_dim,
-                             z_std=args.z_std,
-                             with_BN=args.with_BN,
-                             with_pro=args.with_pro)
+                             z_std=args.z_std)
         elif args.GAN2:
             net = FSL_PN_GAN2(sess,
                               model_name=args.model_name,
@@ -297,9 +271,7 @@ def inference(args):
                               n_base_class=args.n_base_class,
                               l2scale=args.l2scale,
                               z_dim=args.z_dim,
-                              z_std=args.z_std,
-                              with_BN=args.with_BN,
-                              with_pro=args.with_pro)
+                              z_std=args.z_std)
         elif args.AFHN:
             net = FSL_PN_AFHN(sess,
                               model_name=args.model_name,
@@ -309,38 +281,19 @@ def inference(args):
                               n_base_class=args.n_base_class,
                               l2scale=args.l2scale,
                               z_dim=args.z_dim,
-                              z_std=args.z_std,
-                              with_BN=args.with_BN,
-                              with_pro=args.with_pro)
-        elif args.PoseRef:
-            if args.ave_before_encode:
-                net = FSL_PN_PoseRef_Before(sess,
-                                            model_name=args.model_name,
-                                            result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                            fc_dim=args.fc_dim,
-                                            n_class=args.n_class,
-                                            n_base_class=args.n_base_class,
-                                            l2scale=args.l2scale,
-                                            n_gallery_per_class=args.n_gallery_per_class,
-                                            n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                            with_BN=args.with_BN,
-                                            with_pro=args.with_pro,
-                                            use_canonical_gallery=args.use_canonical_gallery,
-                                            n_clusters_per_class=args.n_clusters_per_class)
-            else:
-                net = FSL_PN_PoseRef(sess,
-                                     model_name=args.model_name,
-                                     result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                     fc_dim=args.fc_dim,
-                                     n_class=args.n_class,
-                                     n_base_class=args.n_base_class,
-                                     l2scale=args.l2scale,
-                                     n_gallery_per_class=args.n_gallery_per_class,
-                                     n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                     with_BN=args.with_BN,
-                                     with_pro=args.with_pro,
-                                     use_canonical_gallery=args.use_canonical_gallery,
-                                     n_clusters_per_class=args.n_clusters_per_class)
+                              z_std=args.z_std)
+        elif args.DFHN:
+            net = FSL_PN_DFHN(sess,
+                              model_name=args.model_name,
+                              result_path=os.path.join(args.result_path, args.hallucinator_name),
+                              fc_dim=args.fc_dim,
+                              n_class=args.n_class,
+                              n_base_class=args.n_base_class,
+                              l2scale=args.l2scale,
+                              n_gallery_per_class=args.n_gallery_per_class,
+                              n_base_lb_per_novel=args.n_base_lb_per_novel,
+                              use_canonical_gallery=args.use_canonical_gallery,
+                              n_clusters_per_class=args.n_clusters_per_class)
         elif args.MSL:
             net = MSL(sess,
                       model_name=args.model_name,
@@ -587,7 +540,7 @@ def visualize(args):
                      save_path=os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'hal_vis_embedded.png'))
     ## (6) Find the closest real feature (and the corresponding image) for each hallucinated feature
     if len(training_results) > 6:
-        corresponding_lb_poseRef_dict = {}
+        corresponding_lb_DFHN_dict = {}
         for lb_idx in range(5):
             considered_lb = lb_for_dim_reduction[lb_idx]
             considered_feat_seed = final_novel_feat_dict[considered_lb][:args.n_shot,:]
@@ -636,7 +589,7 @@ def visualize(args):
 
             x_dim = 84
             img_array = np.empty((5*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
-            corresponding_lb_poseRef = []
+            corresponding_lb_DFHN = []
             corresponding_lb_hal = []
             corresponding_lb_hal_class = []
             corresponding_lb_hal_pose = []
@@ -654,7 +607,7 @@ def visualize(args):
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i+len(nearest_indexes_hal),:] = img
-                corresponding_lb_poseRef.append(str(labels_base_train[idx]))
+                corresponding_lb_DFHN.append(str(labels_base_train[idx]))
                 ## (3) put hal image (nearest searching from all classes in the feature space) in the 3rd row
                 idx = nearest_indexes_hal[i]
                 # file_path = os.path.join(args.image_path, fnames_novel_train[idx])
@@ -685,10 +638,10 @@ def visualize(args):
                 img_array[i+4*len(nearest_indexes_hal_pose),:] = img
                 # corresponding_lb_hal_pose.append(str(labels_novel_train[idx]))
                 corresponding_lb_hal_pose.append(str(labels_all_train[idx]))
-            subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + corresponding_lb_poseRef + corresponding_lb_hal + corresponding_lb_hal_class + corresponding_lb_hal_pose
+            subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + corresponding_lb_DFHN + corresponding_lb_hal + corresponding_lb_hal_class + corresponding_lb_hal_pose
             fig = plot(img_array, 5, n_hal_plot, x_dim=x_dim, subtitles=subtitle_list, fontsize=10)
             plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
-            corresponding_lb_poseRef_dict[considered_lb] = corresponding_lb_poseRef
+            corresponding_lb_DFHN_dict[considered_lb] = corresponding_lb_DFHN
     else:
         for lb_idx in range(5):
             considered_lb = lb_for_dim_reduction[lb_idx]
@@ -822,7 +775,7 @@ def visualize(args):
     #         # print('for label %d, best_n.shape: %s' % (lb, best_n.shape))
     #         print('for label %d, the top %d scores of the first %d hallucinated features are:' % (lb, args.n_top, n_hal_plot))
     #         for idx in range(n_hal_plot):
-    #             print('hal %d (poseRef label: %s), ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
+    #             print('hal %d (DFHN label: %s), ' % (idx, corresponding_lb_DFHN_dict[lb][idx]), end='')
     #             print(best_n[idx, :])
     ## (9) Visualize logits of hallucinated features using the linear classifier (and a prototypical network)
     ##     trained on real (base + novel) features with many shots per class
@@ -853,11 +806,11 @@ def visualize(args):
     #         # print('for label %d, best_n.shape: %s' % (lb, best_n.shape))
     #         print('for label %d, the top %d scores of the first %d hallucinated features are:' % (lb, args.n_top, n_hal_plot))
     #         for idx in range(n_hal_plot):
-    #             print('hal %d (poseRef label: %s), ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
+    #             print('hal %d (DFHN label: %s), ' % (idx, corresponding_lb_DFHN_dict[lb][idx]), end='')
     #             print(best_n[idx, :])
 
     ## (10) Print logits of hal features using the current linear_cls (and proto_enc)
-    if args.GAN or args.GAN2 or args.AFHN or args.PoseRef:
+    if args.GAN or args.GAN2 or args.AFHN or args.DFHN:
         tf.reset_default_graph()
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_frac)
         with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
@@ -870,9 +823,7 @@ def visualize(args):
                                  n_base_class=args.n_base_class,
                                  l2scale=args.l2scale,
                                  z_dim=args.z_dim,
-                                 z_std=args.z_std,
-                                 with_BN=args.with_BN,
-                                 with_pro=args.with_pro)
+                                 z_std=args.z_std)
             elif args.GAN2:
                 net = FSL_PN_GAN2(sess,
                                   model_name=args.model_name,
@@ -882,9 +833,7 @@ def visualize(args):
                                   n_base_class=args.n_base_class,
                                   l2scale=args.l2scale,
                                   z_dim=args.z_dim,
-                                  z_std=args.z_std,
-                                  with_BN=args.with_BN,
-                                  with_pro=args.with_pro)
+                                  z_std=args.z_std)
             elif args.AFHN:
                 net = FSL_PN_AFHN(sess,
                                   model_name=args.model_name,
@@ -894,38 +843,19 @@ def visualize(args):
                                   n_base_class=args.n_base_class,
                                   l2scale=args.l2scale,
                                   z_dim=args.z_dim,
-                                  z_std=args.z_std,
-                                  with_BN=args.with_BN,
-                                  with_pro=args.with_pro)
-            elif args.PoseRef:
-                if args.ave_before_encode:
-                    net = FSL_PN_PoseRef_Before(sess,
-                                                model_name=args.model_name,
-                                                result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                                fc_dim=args.fc_dim,
-                                                n_class=args.n_class,
-                                                n_base_class=args.n_base_class,
-                                                l2scale=args.l2scale,
-                                                n_gallery_per_class=args.n_gallery_per_class,
-                                                n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                                with_BN=args.with_BN,
-                                                with_pro=args.with_pro,
-                                                use_canonical_gallery=args.use_canonical_gallery,
-                                                n_clusters_per_class=args.n_clusters_per_class)
-                else:
-                    net = FSL_PN_PoseRef(sess,
-                                         model_name=args.model_name,
-                                         result_path=os.path.join(args.result_path, args.hallucinator_name),
-                                         fc_dim=args.fc_dim,
-                                         n_class=args.n_class,
-                                         n_base_class=args.n_base_class,
-                                         l2scale=args.l2scale,
-                                         n_gallery_per_class=args.n_gallery_per_class,
-                                         n_base_lb_per_novel=args.n_base_lb_per_novel,
-                                         with_BN=args.with_BN,
-                                         with_pro=args.with_pro,
-                                         use_canonical_gallery=args.use_canonical_gallery,
-                                         n_clusters_per_class=args.n_clusters_per_class)
+                                  z_std=args.z_std)
+            elif args.DFHN:
+                net = FSL_PN_DFHN(sess,
+                                  model_name=args.model_name,
+                                  result_path=os.path.join(args.result_path, args.hallucinator_name),
+                                  fc_dim=args.fc_dim,
+                                  n_class=args.n_class,
+                                  n_base_class=args.n_base_class,
+                                  l2scale=args.l2scale,
+                                  n_gallery_per_class=args.n_gallery_per_class,
+                                  n_base_lb_per_novel=args.n_base_lb_per_novel,
+                                  use_canonical_gallery=args.use_canonical_gallery,
+                                  n_clusters_per_class=args.n_clusters_per_class)
             net.build_model()
             hal_logits_dict = net.get_hal_logits(final_novel_feat_dict=final_novel_feat_dict,
                                                  n_shot=args.n_shot,
@@ -942,9 +872,9 @@ def visualize(args):
                 best_n = np.argsort(score_all, axis=1)[:,-args.n_top:]
                 # print('for label %d, best_n.shape: %s' % (lb, best_n.shape))
                 print('for label %d, the top %d scores of the first %d hallucinated features are:' % (lb, args.n_top, n_hal_plot))
-                if args.PoseRef:
+                if args.DFHN:
                     for idx in range(n_hal_plot):
-                        print('hal %d (poseRef label: %s): ' % (idx, corresponding_lb_poseRef_dict[lb][idx]), end='')
+                        print('hal %d (DFHN label: %s): ' % (idx, corresponding_lb_DFHN_dict[lb][idx]), end='')
                         print(best_n[idx, :], end=', ')
                         print('score entropy: %.4f' % entropy(list(score_all[idx,:])))
                 else:

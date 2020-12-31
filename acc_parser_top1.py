@@ -20,7 +20,7 @@ with open(sys.argv[1], 'r') as fhand:
     for line in fhand:
         line = line.strip()
         if re.search('^WARNING', line):
-            if re.search('_0" already exists!', line):
+            if re.search('_ite0" already exists!', line):
                 ##### if 'acc_list' is not empty, it means that we already collect some results
                 ##### ==> print the results and clear 'acc_list' for the next result
                 if not len(acc_list) == 0:
@@ -44,9 +44,9 @@ with open(sys.argv[1], 'r') as fhand:
                 n_aug = re.search('shot[0-9]+aug([0-9]+)', line).group(1)
         else:
             loss_list.append(float(re.search('test loss: ([0-9]+\.[0-9]+)', line).group(1)))
-            acc_list.append(float(re.search('top-5 test accuracy: ([0|1]\.[0-9]+)', line).group(1)))
-            acc_novel_only_list.append(float(re.search('novel-only top-5 test accuracy: ([0|1]\.[0-9]+)', line).group(1)))
-            acc_novel_list.append(float(re.search('novel top-5 test accuracy: ([0|1]\.[0-9]+)', line).group(1)))
+            acc_list.append(float(re.search(', test accuracy: ([0|1]\.[0-9]+)', line).group(1)))
+            acc_novel_only_list.append(float(re.search('novel-only test accuracy: ([0|1]\.[0-9]+)', line).group(1)))
+            acc_novel_list.append(float(re.search('novel test accuracy: ([0|1]\.[0-9]+)', line).group(1)))
     str_to_print_all.append('%s,%s,%s,%.6f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f' % \
         (lr, n_shot, n_aug, np.mean(loss_list), np.mean(acc_novel_only_list)*100, np.std(acc_novel_only_list)*100, np.mean(acc_novel_list)*100, np.std(acc_novel_list)*100, np.mean(acc_list)*100, np.std(acc_list)*100))
     loss_list_ave_all.append(np.mean(loss_list))
@@ -65,5 +65,5 @@ print(str_to_print_all[best_idx])
 # (2) based on the max novel top-5 accuracy
 best_idx = np.argmax(acc_novel_list_ave_all)
 # print('best_idx:', best_idx)
-print('best novel top-5 acc: ', end='')
+print('best novel top-1 acc: ', end='')
 print(str_to_print_all[best_idx])
