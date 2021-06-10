@@ -1396,7 +1396,7 @@ class FSL_PN_DFHN(FSL):
             os.makedirs(os.path.join(self.result_path, self.model_name))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
         
-        wnid_to_category = unpickle(os.path.join('/data/put_data/cclin/datasets/ILSVRC2012', 'wnid_to_category_dict'))
+        # wnid_to_category = unpickle(os.path.join('/data/put_data/cclin/datasets/ILSVRC2012', 'wnid_to_category_dict'))
         
         ### Load training features (as two dictionaries) from both base and novel classes
         train_novel_dict = unpickle(train_novel_path)
