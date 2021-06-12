@@ -2,10 +2,12 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 import numpy as np
 from model_hal import HAL_PN_only, HAL_PN_GAN, HAL_PN_GAN2, HAL_PN_AFHN, HAL_PN_DFHN
-import os, re, glob
+import re, glob
 
 import argparse
 

@@ -6,7 +6,6 @@ from tensorflow.python.framework import graph_util
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from tensorflow.contrib.layers import l2_regularizer
-import tqdm
 
 from ops import *
 from utils import *
@@ -336,7 +335,7 @@ class HAL_PN_only(object):
             acc_ite_train = []
             loss_ite_val = []
             acc_ite_val = []
-            for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+            for ite in range(1, (n_ite_per_epoch+1)):
                 ##### make episode
                 skip_this_episode = False
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
@@ -367,7 +366,7 @@ class HAL_PN_only(object):
             
             #### validation on val classes
             if not self.val_path is None:
-                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                for ite in range(1, (n_ite_per_epoch+1)):
                     ##### make episode
                     skip_this_episode = False
                     selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
@@ -660,7 +659,7 @@ class HAL_PN_GAN(object):
             acc_ite_train = []
             loss_ite_val = []
             acc_ite_val = []
-            for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+            for ite in range(1, (n_ite_per_epoch+1)):
                 ##### make episode
                 skip_this_episode = False
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
@@ -718,7 +717,7 @@ class HAL_PN_GAN(object):
             
             #### validation on val classes
             if not self.val_path is None:
-                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                for ite in range(1, (n_ite_per_epoch+1)):
                     ##### make episode
                     skip_this_episode = False
                     selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
@@ -1111,7 +1110,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
             acc_ite_train = []
             loss_ite_val = []
             acc_ite_val = []
-            for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+            for ite in range(1, (n_ite_per_epoch+1)):
                 ### [2020/08/18a] Use the same set of classes during the training of discriminator and hallucinator in each episode
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 if self.lambda_tf > 0:
@@ -1192,7 +1191,7 @@ class HAL_PN_AFHN(HAL_PN_GAN):
             
             #### validation on val classes
             if not self.val_path is None:
-                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                for ite in range(1, (n_ite_per_epoch+1)):
                     ##### make episode
                     skip_this_episode = False
                     selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
@@ -1619,7 +1618,7 @@ class HAL_PN_DFHN(object):
             acc_ite_train = []
             loss_ite_val = []
             acc_ite_val = []
-            for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+            for ite in range(1, (n_ite_per_epoch+1)):
                 ### [2020/08/18a] Use the same set of classes during the training of discriminator and hallucinator in each episode
                 selected_lbs = np.random.choice(list(self.all_train_labels), self.n_way, replace=False)
                 selected_lbs_pose = np.random.choice(list(self.all_train_labels - set(selected_lbs)), self.n_way, replace=False)
@@ -1765,7 +1764,7 @@ class HAL_PN_DFHN(object):
             
             #### validation on val classes
             if not self.val_path is None:
-                for ite in tqdm.tqdm(range(1, (n_ite_per_epoch+1))):
+                for ite in range(1, (n_ite_per_epoch+1)):
                     ##### make episode
                     skip_this_episode = False
                     selected_lbs = np.random.choice(list(self.all_val_labels), self.n_way, replace=False)
@@ -1815,7 +1814,7 @@ class HAL_PN_DFHN(object):
         train_code_class_all = []
         train_code_pose_all = []
         nBatches = int(np.ceil(self.train_feat_list.shape[0] / bsize))
-        for idx in tqdm.tqdm(range(nBatches)):
+        for idx in range(nBatches):
             batch_features = self.train_feat_list[idx*bsize:(idx+1)*bsize]
             train_code_class, train_code_pose = self.sess.run([self.train_code_class, self.train_code_pose],
                                                               feed_dict={self.train_feat: batch_features})
@@ -1887,7 +1886,7 @@ class HAL_PN_DFHN(object):
             # train_code_class_all = []
             train_code_pose_all = []
             nBatches = int(np.ceil(self.train_feat_list.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches)):
+            for idx in range(nBatches):
                 batch_features = self.train_feat_list[idx*bsize:(idx+1)*bsize]
                 # train_code_class, train_code_pose = self.sess.run([self.train_code_class, self.train_code_pose],
                 train_code_pose = self.sess.run(self.train_code_pose,

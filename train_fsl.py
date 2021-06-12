@@ -2,13 +2,15 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 import numpy as np
 from model_fsl import FSL, MSL, MSL_PN
 from model_fsl import FSL_PN_GAN, FSL_PN_GAN2
 from model_fsl import FSL_PN_AFHN
 from model_fsl import FSL_PN_DFHN
-import os, re, glob
+import re, glob
 
 import argparse
 

@@ -2,7 +2,6 @@ import os, re, time, glob
 import numpy as np
 import json
 import tensorflow as tf
-import tqdm
 
 from ops import *
 from utils import *
@@ -261,7 +260,7 @@ class BasicCls(object):
             lr = lr_start * lr_decay**((epoch-1)//lr_decay_step)
             loss_train_batch = []
             acc_train_batch = []
-            for idx in tqdm.tqdm(range(self.nBatches)):
+            for idx in range(self.nBatches):
                 _, loss, acc = self.sess.run([self.opt, self.loss, self.acc],
                                              feed_dict={self.bn_train: True,
                                                         self.learning_rate: lr})
@@ -273,7 +272,7 @@ class BasicCls(object):
             #### [2020/07/22] add validation using data specified in 'base_test.json'
             loss_test_batch = []
             acc_test_batch = []
-            for idx in tqdm.tqdm(range(self.nBatches_test)):
+            for idx in range(self.nBatches_test):
                 batch_files = self.test_image_list[idx*self.bsize:(idx+1)*self.bsize]
                 batch = [get_image_resize_normalize(batch_file, self.img_size, center_crop=self.center_crop, aug_size=self.aug_size) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)
@@ -323,7 +322,7 @@ class BasicCls(object):
 
             features_all = []
             # pred_all = []
-            for idx in tqdm.tqdm(range(nBatches)):
+            for idx in range(nBatches):
                 batch_files = data_image_list[idx*self.bsize:(idx+1)*self.bsize]
                 batch = [get_image_resize_normalize(batch_file, self.img_size, center_crop=self.center_crop, aug_size=self.aug_size) for batch_file in batch_files]
                 batch_images = np.array(batch).astype(np.float32)

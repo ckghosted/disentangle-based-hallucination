@@ -9,7 +9,6 @@ from ops import *
 from utils import *
 
 import pickle
-import tqdm
 
 def dopickle(dict_, file):
     with open(file, 'wb') as fo:
@@ -272,7 +271,7 @@ class FSL(object):
             ### make prediction and compute accuracy            
             loss_test_batch = []
             logits_all = None
-            for idx in tqdm.tqdm(range(nBatches_test)):
+            for idx in range(nBatches_test):
                 batch_features = features_test[idx*bsize:(idx+1)*bsize]
                 batch_labels = labels_test[idx*bsize:(idx+1)*bsize]
                 loss, logits = self.sess.run([self.loss, self.logits],
@@ -950,7 +949,7 @@ class FSL_PN_GAN(FSL):
             ### encode novel features using the two encoders for visualization
             novel_code_class_all = []
             nBatches_novel = int(np.ceil(features_novel_train.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches_novel)):
+            for idx in range(nBatches_novel):
                 batch_features = features_novel_train[idx*bsize:(idx+1)*bsize]
                 novel_code_class = self.sess.run(self.novel_code_class,
                                                  feed_dict={self.novel_feat: batch_features})
@@ -960,7 +959,7 @@ class FSL_PN_GAN(FSL):
             ### encode base features using the two encoders for visualization
             base_code_class_all = []
             nBatches_base = int(np.ceil(features_base_train.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches_base)):
+            for idx in range(nBatches_base):
                 batch_features = features_base_train[idx*bsize:(idx+1)*bsize]
                 #### (reuse self.novel_code_class, self.novel_code_pose, and self.novel_feat for convenience)
                 base_code_class = self.sess.run(self.novel_code_class,
@@ -1229,7 +1228,7 @@ class FSL_PN_AFHN(FSL_PN_GAN):
             ### encode novel features using the two encoders for visualization
             novel_code_class_all = []
             nBatches_novel = int(np.ceil(features_novel_train.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches_novel)):
+            for idx in range(nBatches_novel):
                 batch_features = features_novel_train[idx*bsize:(idx+1)*bsize]
                 novel_code_class = self.sess.run(self.novel_code_class,
                                                  feed_dict={self.novel_feat: batch_features})
@@ -1239,7 +1238,7 @@ class FSL_PN_AFHN(FSL_PN_GAN):
             ### encode base features using the two encoders for visualization
             base_code_class_all = []
             nBatches_base = int(np.ceil(features_base_train.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches_base)):
+            for idx in range(nBatches_base):
                 batch_features = features_base_train[idx*bsize:(idx+1)*bsize]
                 #### (reuse self.novel_code_class, self.novel_code_pose, and self.novel_feat for convenience)
                 base_code_class = self.sess.run(self.novel_code_class,
@@ -1680,7 +1679,7 @@ class FSL_PN_DFHN(FSL):
             novel_code_class_all = []
             novel_code_pose_all = []
             nBatches_novel = int(np.ceil(features_novel_train.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches_novel)):
+            for idx in range(nBatches_novel):
                 batch_features = features_novel_train[idx*bsize:(idx+1)*bsize]
                 novel_code_class, novel_code_pose = self.sess.run([self.novel_code_class, self.novel_code_pose],
                                                                   feed_dict={self.novel_feat: batch_features})
@@ -1693,7 +1692,7 @@ class FSL_PN_DFHN(FSL):
             base_code_class_all = []
             base_code_pose_all = []
             nBatches_base = int(np.ceil(features_base_train.shape[0] / bsize))
-            for idx in tqdm.tqdm(range(nBatches_base)):
+            for idx in range(nBatches_base):
                 batch_features = features_base_train[idx*bsize:(idx+1)*bsize]
                 #### (reuse self.novel_code_class, self.novel_code_pose, and self.novel_feat for convenience)
                 base_code_class, base_code_pose = self.sess.run([self.novel_code_class, self.novel_code_pose],
