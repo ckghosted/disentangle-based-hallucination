@@ -476,6 +476,13 @@ def visualize(args):
     features_all_train = np.concatenate((features_novel_train, features_base_train), axis=0)
     labels_all_train = labels_novel_train + labels_base_train
     fnames_all_train = fnames_novel_train + fnames_base_train
+    ## [2020/12/09] Frank suggests: search the nearest real feature for each hallucinated feature in the feature space FROM THE CORRECT LABEL!
+    features_novel_train_each_lb = {}
+    idxs_each_lb = {}
+    for lb in all_novel_labels:
+        temp_idxs = [i for i in range(features_novel_train.shape[0]) if labels_novel_train[i] == lb]
+        idxs_each_lb[lb] = temp_idxs
+        features_novel_train_each_lb[lb] = features_novel_train[temp_idxs,:]
     ## (2) Load training results
     training_results = np.load(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'results.npy'), allow_pickle=True)
     final_novel_feat_dict = training_results[2]
@@ -567,42 +574,54 @@ def visualize(args):
                 nearest_idx, nearest_diff = find_nearest_idx(features_base_train, considered_feat_pose[idx])
                 nearest_indexes_pose.append(nearest_idx)
                 nearest_differences_pose.append(nearest_diff)
-                # (a) nearest in the feature space
+                # ##### (a) nearest in the feature space
+                # ##### (option1) search from novel classes only
                 # nearest_idx, nearest_diff = find_nearest_idx(features_novel_train, considered_feat_hal[idx])
                 # nearest_indexes_hal.append(nearest_idx)
                 # nearest_differences_hal.append(nearest_diff)
-                nearest_idx, nearest_diff = find_nearest_idx(features_all_train, considered_feat_hal[idx])
-                nearest_indexes_hal.append(nearest_idx)
-                nearest_differences_hal.append(nearest_diff)
-                # (b) nearest based on the class codes
+                # ##### (option2) search from all classes
+                # nearest_idx, nearest_diff = find_nearest_idx(features_all_train, considered_feat_hal[idx])
+                # nearest_indexes_hal.append(nearest_idx)
+                # nearest_differences_hal.append(nearest_diff)
+                # ##### (b) nearest based on the class codes
+                # ##### (option1) search from novel classes only
                 # nearest_idx, nearest_diff = find_nearest_idx(novel_code_class_all, considered_feat_hal_class[idx])
                 # nearest_indexes_hal_class.append(nearest_idx)
                 # nearest_differences_hal_class.append(nearest_diff)
-                nearest_idx, nearest_diff = find_nearest_idx(code_class_all, considered_feat_hal_class[idx])
-                nearest_indexes_hal_class.append(nearest_idx)
-                nearest_differences_hal_class.append(nearest_diff)
-                # (c) nearest based on the appearance codes
+                # ##### (option2) search from all classes
+                # nearest_idx, nearest_diff = find_nearest_idx(code_class_all, considered_feat_hal_class[idx])
+                # nearest_indexes_hal_class.append(nearest_idx)
+                # nearest_differences_hal_class.append(nearest_diff)
+                # ##### (c) nearest based on the appearance codes
+                # ##### (option1) search from novel classes only
                 # nearest_idx, nearest_diff = find_nearest_idx(novel_code_pose_all, considered_feat_hal_pose[idx])
                 # nearest_indexes_hal_pose.append(nearest_idx)
                 # nearest_differences_hal_pose.append(nearest_diff)
-                nearest_idx, nearest_diff = find_nearest_idx(code_pose_all, considered_feat_hal_pose[idx])
-                nearest_indexes_hal_pose.append(nearest_idx)
-                nearest_differences_hal_pose.append(nearest_diff)
+                # ##### (option2) search from all classes
+                # nearest_idx, nearest_diff = find_nearest_idx(code_pose_all, considered_feat_hal_pose[idx])
+                # nearest_indexes_hal_pose.append(nearest_idx)
+                # nearest_differences_hal_pose.append(nearest_diff)
+                ##### [2020/12/09] Frank suggests: search the nearest real feature for each hallucinated feature in the feature space FROM THE CORRECT LABEL!
+                nearest_idx_, nearest_diff = find_nearest_idx(features_novel_train_each_lb[considered_lb], considered_feat_hal[idx])
+                nearest_idx = idxs_each_lb[considered_lb][nearest_idx_]
+                nearest_indexes_hal.append(nearest_idx)
+                nearest_differences_hal.append(nearest_diff)
 
             x_dim = 84
-            img_array = np.empty((5*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
+            img_array = np.empty((3*n_hal_plot, x_dim, x_dim, 3), dtype='uint8')
             corresponding_lb_DFHN = []
             corresponding_lb_hal = []
             corresponding_lb_hal_class = []
             corresponding_lb_hal_pose = []
             for i in range(len(nearest_indexes_hal)):
-                ## (1) put seed image in the 1st row
+                ##### (1) put seed image in the 1st row
                 file_path = os.path.join(args.image_path, fnames_novel_train[nearest_idx_seed])
                 img = cv2.imread(file_path, cv2.IMREAD_COLOR)
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i,:] = img
-                ## (2) put pose-ref image in the 2nd row
+                ##### -------------------------------------------------------
+                ##### (2) put pose-ref image in the 2nd row
                 idx = nearest_indexes_pose[i]
                 file_path = os.path.join(args.image_path, fnames_base_train[idx])
                 img = cv2.imread(file_path, cv2.IMREAD_COLOR)
@@ -610,38 +629,53 @@ def visualize(args):
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i+len(nearest_indexes_hal),:] = img
                 corresponding_lb_DFHN.append(str(labels_base_train[idx]))
-                ## (3) put hal image (nearest searching from all classes in the feature space) in the 3rd row
+                ##### -------------------------------------------------------
+                ##### (3) put hal image (nearest searching from all classes in the feature space) in the 3rd row
                 idx = nearest_indexes_hal[i]
-                # file_path = os.path.join(args.image_path, fnames_novel_train[idx])
-                file_path = os.path.join(args.image_path, fnames_all_train[idx])
+                ##### (option1) search from novel classes only
+                file_path = os.path.join(args.image_path, fnames_novel_train[idx])
+                ##### (option2) search from all classes
+                # file_path = os.path.join(args.image_path, fnames_all_train[idx])
                 img = cv2.imread(file_path, cv2.IMREAD_COLOR)
                 img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img_array[i+2*len(nearest_indexes_hal),:] = img
-                # corresponding_lb_hal.append(str(labels_novel_train[idx]))
-                corresponding_lb_hal.append(str(labels_all_train[idx]))
-                ## (4) put hal image (nearest searching from all classes based on the class codes) in the 4th row
-                idx = nearest_indexes_hal_class[i]
+                ##### (option1) search from novel classes only
+                corresponding_lb_hal.append(str(labels_novel_train[idx]))
+                ##### (option2) search from all classes
+                # corresponding_lb_hal.append(str(labels_all_train[idx]))
+                ##### -------------------------------------------------------
+                ##### (4) put hal image (nearest searching from all classes based on the class codes) in the 4th row
+                # idx = nearest_indexes_hal_class[i]
+                ##### (option1) search from novel classes only
                 # file_path = os.path.join(args.image_path, fnames_novel_train[idx])
-                file_path = os.path.join(args.image_path, fnames_all_train[idx])
-                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img_array[i+3*len(nearest_indexes_hal_class),:] = img
+                ##### (option2) search from all classes
+                # file_path = os.path.join(args.image_path, fnames_all_train[idx])
+                # img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                # img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                # img_array[i+3*len(nearest_indexes_hal_class),:] = img
+                ##### (option1) search from novel classes only
                 # corresponding_lb_hal_class.append(str(labels_novel_train[idx]))
-                corresponding_lb_hal_class.append(str(labels_all_train[idx]))
-                ## (5) put hal image (nearest searching from all classes based on the pose codes) in the 5th row
-                idx = nearest_indexes_hal_pose[i]
+                ##### (option2) search from all classes
+                # corresponding_lb_hal_class.append(str(labels_all_train[idx]))
+                ##### -------------------------------------------------------
+                ##### (5) put hal image (nearest searching from all classes based on the pose codes) in the 5th row
+                # idx = nearest_indexes_hal_pose[i]
+                ##### (option1) search from novel classes only
                 # file_path = os.path.join(args.image_path, fnames_novel_train[idx])
-                file_path = os.path.join(args.image_path, fnames_all_train[idx])
-                img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-                img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img_array[i+4*len(nearest_indexes_hal_pose),:] = img
+                ##### (option2) search from all classes
+                # file_path = os.path.join(args.image_path, fnames_all_train[idx])
+                # img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                # img = cv2.resize(img, (x_dim, x_dim), interpolation=cv2.INTER_CUBIC)
+                # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                # img_array[i+4*len(nearest_indexes_hal_pose),:] = img
+                ##### (option1) search from novel classes only
                 # corresponding_lb_hal_pose.append(str(labels_novel_train[idx]))
-                corresponding_lb_hal_pose.append(str(labels_all_train[idx]))
-            subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + corresponding_lb_DFHN + corresponding_lb_hal + corresponding_lb_hal_class + corresponding_lb_hal_pose
-            fig = plot(img_array, 5, n_hal_plot, x_dim=x_dim, subtitles=subtitle_list, fontsize=10)
+                ##### (option2) search from all classes
+                # corresponding_lb_hal_pose.append(str(labels_all_train[idx]))
+            subtitle_list = [str(labels_novel_train[nearest_idx_seed]) for _ in range(n_hal_plot)] + corresponding_lb_DFHN + corresponding_lb_hal
+            fig = plot(img_array, 3, n_hal_plot, x_dim=x_dim, subtitles=subtitle_list, fontsize=10)
             plt.savefig(os.path.join(args.result_path, args.hallucinator_name, args.model_name, 'nearest_images_%3d.png' % considered_lb), bbox_inches='tight')
             corresponding_lb_DFHN_dict[considered_lb] = corresponding_lb_DFHN
     else:
